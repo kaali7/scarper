@@ -126,6 +126,19 @@ class CDPError(Exception):
 
 
 _DEAD = object()  # put on every event queue when the connection dies
+DEFAULT_NAV_TIMEOUT = 90
+
+
+def nav_timeout(default=DEFAULT_NAV_TIMEOUT):
+    """Seconds Page.navigate waits for Page.loadEventFired (SCRAPER_NAV_TIMEOUT env var, min 5)."""
+    raw = os.environ.get("SCRAPER_NAV_TIMEOUT", "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 5 else default
 
 
 class CDP:
@@ -258,7 +271,8 @@ class Page:
         self.send("Network.setCookie", {"name": name, "value": value, "domain": domain, "path": "/",
                                         "secure": True})
 
-    def navigate(self, url, timeout=45):
+    def navigate(self, url, timeout=None):
+        timeout = nav_timeout() if timeout is None else timeout
         loaded = self.cdp.subscribe("Page.loadEventFired", self.sid)
         try:
             r = self.send("Page.navigate", {"url": url}, timeout=timeout)

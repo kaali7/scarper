@@ -290,6 +290,27 @@ class PageUserAgent(unittest.TestCase):
         self.assertEqual(calls[-1].args[:2], ("Page.navigate", {"url": "https://example.com"}))
 
 
+class NavTimeout(unittest.TestCase):
+    def test_nav_timeout_env_and_fallback(self):
+        from unittest.mock import Mock, patch
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SCRAPER_NAV_TIMEOUT", None)
+            self.assertEqual(cdp.nav_timeout(), cdp.DEFAULT_NAV_TIMEOUT)
+        with patch.dict(os.environ, {"SCRAPER_NAV_TIMEOUT": "120"}):
+            self.assertEqual(cdp.nav_timeout(), 120)
+            conn = Mock(user_agent=None)
+            conn.send.return_value = {"targetId": "T", "sessionId": "S"}
+            conn.wait_event.return_value = {}
+            page = cdp.Page(conn)
+            page.navigate("https://example.com")
+            self.assertEqual(conn.wait_event.call_args.args[2], 120)
+            page.navigate("https://example.com", timeout=15)
+            self.assertEqual(conn.wait_event.call_args.args[2], 15)
+        for bad in ("abc", "0", "4", "-5"):
+            with patch.dict(os.environ, {"SCRAPER_NAV_TIMEOUT": bad}):
+                self.assertEqual(cdp.nav_timeout(), cdp.DEFAULT_NAV_TIMEOUT)
+
+
 class FakeCDP:
     def __init__(self):
         self.closed, self.q = None, queue.Queue()

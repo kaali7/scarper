@@ -16,7 +16,7 @@ import shutil, sqlite3, tempfile, threading, time, urllib.parse, urllib.request,
 from datetime import datetime, timezone
 
 import browser, details, maps
-from cdp import CDPError, Page
+from cdp import CDPError, Page, nav_timeout
 
 csv.field_size_limit(2 ** 31 - 1)  # a long cell (a description, a 1.x file) can pass csv's 128 KB default
 
@@ -34,9 +34,9 @@ LEAD = ["title", "phone", "emails", "website", "category", "address", "review_ra
 RENAME = {"open_state": "status", "description": "descriptions"}  # details.FIELDS name -> CSV column
 
 # Seconds past max_time before the watchdog kills Chrome. maps.collect's page load and first waits
-# (navigate 45 s, consent 15 s, feed 15 s, first batch 10 s) sit outside its max_seconds, so a
-# shorter grace could kill a keyword that was about to return its rows.
-WATCHDOG_GRACE = 90
+# (navigate SCRAPER_NAV_TIMEOUT s [default 90 s], consent 15 s, feed 15 s, first batch 10 s) sit
+# outside its max_seconds, so a shorter grace could kill a keyword that was about to return its rows.
+WATCHDOG_GRACE = max(90, nav_timeout() + 45)
 SITE_WORKERS = 8      # business websites fetched at once by the website pass
 SITE_TIMEOUT = 10     # seconds per website request (each socket read)
 SITE_HARD = 30        # seconds a website request may take in all, then its socket is closed

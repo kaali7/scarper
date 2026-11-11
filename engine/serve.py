@@ -20,7 +20,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import browser, jobs  # noqa: E402
+import browser, cdp, jobs  # noqa: E402
 
 for _stream in (sys.stdout, sys.stderr):  # ✓ and accented names on a Windows cp1252 console
     try:
@@ -66,7 +66,7 @@ def load_types(folder=None):
 TYPES = load_types()
 TYPES_JS = json.dumps(TYPES).replace("</", "<\\/")  # the What list, inlined in the page script
 _cities, _cities_lock = None, threading.Lock()
-ENV_KEYS = ("SCRAPER_PORT", "SCRAPER_API_KEY", "SCRAPER_HEADLESS")
+ENV_KEYS = ("SCRAPER_PORT", "SCRAPER_API_KEY", "SCRAPER_HEADLESS", "SCRAPER_NAV_TIMEOUT")
 MAX_BODY = 1 << 20
 LOCAL = r"(localhost|127\.0\.0\.1|\[::1\])"
 HOST_OK = re.compile(rf"^{LOCAL}(:\d{{1,5}})?$", re.I)
@@ -148,7 +148,7 @@ def env_value(v):
 
 
 def read_env():
-    """SCRAPER_PORT, SCRAPER_API_KEY and SCRAPER_HEADLESS: the environment wins, then the kit's .env (last line wins,
+    """SCRAPER_PORT, SCRAPER_API_KEY, SCRAPER_HEADLESS and SCRAPER_NAV_TIMEOUT: the environment wins, then the kit's .env (last line wins,
     as in docker compose and scripts/scrape.py)."""
     found = {}
     try:
@@ -634,7 +634,7 @@ load(); setInterval(load, 3000);
   const num = v => (String(v).replace(/^v/, '').split('.').slice(0, 3).map(x => parseInt(x, 10) || 0));
   const newer = (a, b) => {{ const x = num(a), y = num(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; }};
   function show(tag) {{
-    if (!/^v?\d+\.\d+\.\d+/.test(tag || '') || !newer(tag, mine)) return;
+    if (!/^v?\\d+\\.\\d+\\.\\d+/.test(tag || '') || !newer(tag, mine)) return;
     $('up-v').textContent = String(tag).replace(/^v/, '').slice(0, 20);
     $('up-link').href = '{repo}/releases/tag/' + encodeURIComponent(tag);
     $('update').hidden = false;
@@ -938,6 +938,15 @@ def main():
         port = a.port or int(env["SCRAPER_PORT"] or 8080)
     except ValueError:
         sys.exit(f"✗ SCRAPER_PORT is not a number: {env['SCRAPER_PORT']!r}")
+    if env["SCRAPER_NAV_TIMEOUT"]:
+        try:
+            nav_t = int(env["SCRAPER_NAV_TIMEOUT"])
+        except ValueError:
+            sys.exit(f"✗ SCRAPER_NAV_TIMEOUT is not a number: {env['SCRAPER_NAV_TIMEOUT']!r}")
+        if nav_t < 5:
+            sys.exit(f"✗ SCRAPER_NAV_TIMEOUT must be 5 seconds or more (got {nav_t}).")
+        os.environ["SCRAPER_NAV_TIMEOUT"] = str(nav_t)
+        jobs.WATCHDOG_GRACE = max(90, nav_t + 45)
     browser.make_home()
     browser.sweep_profiles()
     try:
