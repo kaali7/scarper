@@ -5,6 +5,7 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tauri::AppHandle;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::config::resolve_kit_root;
 use crate::db::read_jobs_from_db;
@@ -110,32 +111,46 @@ pub fn scan_csv_files(kit_root: &Path) -> AppResult<Vec<CsvFileEntry>> {
         .map(|j| (j.id, (j.name, j.status)))
         .collect();
 
-    if let Ok(rd) = fs::read_dir(kit_root) {
-        for item in rd.flatten() {
-            let p = item.path();
-            if p.is_file()
-                && p.extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.eq_ignore_ascii_case("csv"))
-                    .unwrap_or(false)
-            {
-                if let Ok(meta) = item.metadata() {
-                    let modified_ms = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
-                    entries.push(CsvFileEntry {
-                        name: item.file_name().to_string_lossy().to_string(),
-                        path: p.to_string_lossy().to_string(),
-                        source: "workspace".to_string(),
-                        size_bytes: meta.len(),
-                        modified_ms,
-                        row_count: count_csv_data_rows(&p),
-                        job_id: None,
-                        job_status: None,
-                    });
+    let mut scan_dirs = vec![kit_root.to_path_buf()];
+    for sub in ["out", "output", "data", "gmaps-output"] {
+        let sub_dir = kit_root.join(sub);
+        if sub_dir.is_dir() {
+            scan_dirs.push(sub_dir);
+        }
+    }
+
+    for dir in scan_dirs {
+        if let Ok(rd) = fs::read_dir(&dir) {
+            for item in rd.flatten() {
+                let p = item.path();
+                if p.is_file()
+                    && p.extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("csv"))
+                        .unwrap_or(false)
+                {
+                    if let Ok(meta) = item.metadata() {
+                        let modified_ms = meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        let rel_name = p
+                            .strip_prefix(kit_root)
+                            .map(|r| r.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| item.file_name().to_string_lossy().to_string());
+                        entries.push(CsvFileEntry {
+                            name: rel_name,
+                            path: p.to_string_lossy().to_string(),
+                            source: "workspace".to_string(),
+                            size_bytes: meta.len(),
+                            modified_ms,
+                            row_count: count_csv_data_rows(&p),
+                            job_id: None,
+                            job_status: None,
+                        });
+                    }
                 }
             }
         }
@@ -493,12 +508,18 @@ pub fn list_csv_files(app: AppHandle) -> AppResult<Vec<CsvFileEntry>> {
 }
 
 #[tauri::command]
-pub fn read_csv_table(path: String, options: Option<CsvFilterOptions>) -> AppResult<CsvTableData> {
+pub async fn read_csv_table(
+    path: String,
+    options: Option<CsvFilterOptions>,
+) -> AppResult<CsvTableData> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
         return Err(format!("CSV file does not exist: {path}"));
     }
-    load_csv_table(&p, &options.unwrap_or_default())
+    let opts = options.unwrap_or_default();
+    tokio::task::spawn_blocking(move || load_csv_table(&p, &opts))
+        .await
+        .map_err(|e| format!("CSV reader worker failed: {e}"))?
 }
 
 #[tauri::command]
@@ -518,6 +539,38 @@ pub fn export_csv_file(
         .map(|e| e.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
     write_filtered_export(&[src], &dst, &options.unwrap_or_default(), as_json)
+}
+
+#[tauri::command]
+pub fn open_file_externally(app: AppHandle, path: String) -> AppResult<()> {
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(format!("File does not exist: {path}"));
+    }
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext != "csv" && ext != "json" {
+        return Err("Only .csv and .json files can be opened directly.".to_string());
+    }
+    app.opener()
+        .open_path(p.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| format!("Failed to open file: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reveal_file_in_folder(app: AppHandle, path: String) -> AppResult<()> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {path}"));
+    }
+    app.opener()
+        .reveal_item_in_dir(p.to_string_lossy().as_ref())
+        .map_err(|e| format!("Failed to open folder: {e}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -612,6 +665,16 @@ mod tests {
         assert_eq!(arr[1]["title"], "Dress Z");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn loads_coffee_shops_csv_without_error() {
+        let path = PathBuf::from(r"../../.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
+        if path.is_file() {
+            let res = load_csv_table(&path, &CsvFilterOptions::default()).unwrap();
+            assert_eq!(res.rows.len(), 73);
+            assert_eq!(res.headers.len(), 37);
+        }
     }
 }
 

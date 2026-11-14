@@ -35,14 +35,20 @@ pub fn run() {
             engine_proc::read_engine_logs,
             db::list_db_jobs,
             db::delete_db_job,
+            db::clear_db_jobs,
             csv_io::list_csv_files,
             csv_io::read_csv_table,
             csv_io::export_csv_file,
+            csv_io::open_file_externally,
+            csv_io::reveal_file_in_folder,
             scraper_api::list_business_types,
             scraper_api::lookup_city,
             scraper_api::get_job_status,
             scraper_api::start_scrape_job,
+            scraper_api::restart_db_job,
             groq_agent::chat_with_groq,
+            groq_agent::load_chat_history,
+            groq_agent::save_chat_history,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

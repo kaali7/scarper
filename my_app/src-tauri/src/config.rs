@@ -9,6 +9,7 @@ use crate::error::AppResult;
 const KEYRING_SERVICE: &str = "gmaps-scraper-desktop";
 const KEYRING_USER_GROQ: &str = "groq_api_key";
 const CONFIG_FILE: &str = "desktop_config.json";
+pub const DEFAULT_GROQ_MODEL: &str = "qwen/qwen3.8-27b";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,7 +26,7 @@ impl Default for DesktopConfig {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default(),
             python_override: None,
-            groq_model: "llama-3.3-70b-versatile".to_string(),
+            groq_model: DEFAULT_GROQ_MODEL.to_string(),
         }
     }
 }
@@ -115,8 +116,13 @@ pub fn load_config(app: &AppHandle) -> DesktopConfig {
             cfg.kit_root = detected.to_string_lossy().to_string();
         }
     }
-    if cfg.groq_model.trim().is_empty() {
-        cfg.groq_model = "llama-3.3-70b-versatile".to_string();
+    if cfg.groq_model.trim().is_empty()
+        || matches!(
+            cfg.groq_model.trim(),
+            "llama-3.3-70b-versatile" | "qwen/qwen3-32b"
+        )
+    {
+        cfg.groq_model = DEFAULT_GROQ_MODEL.to_string();
     }
     cfg
 }
@@ -267,21 +273,99 @@ pub fn write_kit_env(kit_root: &Path, env: &KitEnv) -> AppResult<()> {
     fs::write(&env_path, content).map_err(|e| format!("Failed to write .env: {e}"))
 }
 
-pub fn get_groq_api_key_internal() -> AppResult<Option<String>> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_GROQ)
-        .map_err(|e| format!("Keyring error: {e}"))?;
-    match entry.get_password() {
-        Ok(pw) => {
-            let trimmed = pw.trim().to_string();
-            if trimmed.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(trimmed))
+fn groq_key_fallback_path(app: &AppHandle) -> AppResult<PathBuf> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create app data dir: {e}"))?;
+    Ok(dir.join("groq_api.key"))
+}
+
+pub fn read_groq_key_from_env_file(kit_root: &Path) -> Option<String> {
+    let raw = fs::read_to_string(kit_root.join(".env")).ok()?;
+    let map = parse_env_text(&raw);
+    for key_name in ["GROQ_API_KEY", "GRAQ_API_KEY"] {
+        if let Some(val) = map.get(key_name) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
             }
         }
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("Failed to read Groq key from OS credential store: {e}")),
     }
+    None
+}
+
+fn clear_groq_key_in_env_file(kit_root: &Path) {
+    let env_path = kit_root.join(".env");
+    let Ok(raw) = fs::read_to_string(&env_path) else {
+        return;
+    };
+    let mut changed = false;
+    let kept: Vec<&str> = raw
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            let rest = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim_start();
+            let is_groq_line = rest
+                .split_once('=')
+                .map(|(k, _)| matches!(k.trim(), "GROQ_API_KEY" | "GRAQ_API_KEY"))
+                .unwrap_or(false);
+            if is_groq_line {
+                changed = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    if changed {
+        let updated = if kept.is_empty() {
+            String::new()
+        } else {
+            kept.join("\n") + "\n"
+        };
+        let _ = fs::write(env_path, updated);
+    }
+}
+
+pub fn get_groq_api_key_internal(app: &AppHandle) -> AppResult<Option<String>> {
+    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_GROQ) {
+        if let Ok(pw) = entry.get_password() {
+            let trimmed = pw.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+    }
+    if let Ok(path) = groq_key_fallback_path(app) {
+        if let Ok(raw) = fs::read_to_string(path) {
+            let trimmed = raw.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+    }
+    for env_name in ["GROQ_API_KEY", "GRAQ_API_KEY"] {
+        if let Ok(env_val) = std::env::var(env_name) {
+            let trimmed = env_val.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+    }
+    let cfg = load_config(app);
+    if !cfg.kit_root.trim().is_empty() {
+        if let Some(val) = read_groq_key_from_env_file(Path::new(&cfg.kit_root)) {
+            return Ok(Some(val));
+        }
+    }
+    if let Some(detected) = detect_kit_root() {
+        if let Some(val) = read_groq_key_from_env_file(&detected) {
+            return Ok(Some(val));
+        }
+    }
+    Ok(None)
 }
 
 pub fn mask_secret(secret: &str) -> String {
@@ -301,7 +385,7 @@ pub fn get_settings(app: AppHandle) -> AppResult<SettingsSummary> {
         .exists()
         .then(|| read_kit_env(Path::new(&config.kit_root)))
         .unwrap_or_default();
-    let key = get_groq_api_key_internal().ok().flatten();
+    let key = get_groq_api_key_internal(&app).ok().flatten();
     let has_groq_key = key.is_some();
     let groq_key_masked = key.as_deref().map(mask_secret).unwrap_or_default();
 
@@ -331,7 +415,7 @@ pub fn save_desktop_settings(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     let clean_model = if groq_model.trim().is_empty() {
-        "llama-3.3-70b-versatile".to_string()
+        DEFAULT_GROQ_MODEL.to_string()
     } else {
         groq_model.trim().to_string()
     };
@@ -342,6 +426,11 @@ pub fn save_desktop_settings(
         groq_model: clean_model,
     };
     save_config_to_disk(&app, &cfg)?;
+
+    let engine_state = app.state::<crate::engine_proc::EngineState>();
+    if let Ok(mut guard) = engine_state.cached_env.lock() {
+        *guard = None;
+    }
 
     if let Some(env_cfg) = kit_env {
         if env_cfg.port == 0 {
@@ -354,32 +443,50 @@ pub fn save_desktop_settings(
 }
 
 #[tauri::command]
-pub fn set_groq_api_key(api_key: String) -> AppResult<String> {
+pub fn set_groq_api_key(app: AppHandle, api_key: String) -> AppResult<String> {
     let clean = api_key.trim().to_string();
     if clean.is_empty() {
         return Err("Groq API key cannot be empty.".to_string());
     }
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_GROQ)
-        .map_err(|e| format!("Keyring error: {e}"))?;
-    entry
-        .set_password(&clean)
-        .map_err(|e| format!("Failed to store Groq API key: {e}"))?;
+    let mut stored_anywhere = false;
+    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_GROQ) {
+        if entry.set_password(&clean).is_ok() {
+            stored_anywhere = true;
+        }
+    }
+    // Always mirror to app_data_dir fallback if keyring fails or on restricted sessions.
+    if let Ok(path) = groq_key_fallback_path(&app) {
+        if fs::write(&path, &clean).is_ok() {
+            stored_anywhere = true;
+        }
+    }
+    if !stored_anywhere {
+        return Err("Failed to store Groq API key in OS credential store or local app data.".to_string());
+    }
     Ok(mask_secret(&clean))
 }
 
 #[tauri::command]
-pub fn clear_groq_api_key() -> AppResult<()> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_GROQ)
-        .map_err(|e| format!("Keyring error: {e}"))?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("Failed to delete Groq API key: {e}")),
+pub fn clear_groq_api_key(app: AppHandle) -> AppResult<()> {
+    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_GROQ) {
+        let _ = entry.delete_credential();
     }
+    if let Ok(path) = groq_key_fallback_path(&app) {
+        let _ = fs::remove_file(path);
+    }
+    let cfg = load_config(&app);
+    if !cfg.kit_root.trim().is_empty() {
+        clear_groq_key_in_env_file(Path::new(&cfg.kit_root));
+    }
+    if let Some(detected) = detect_kit_root() {
+        clear_groq_key_in_env_file(&detected);
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn test_groq_connection() -> AppResult<Vec<String>> {
-    let key = get_groq_api_key_internal()?
+pub async fn test_groq_connection(app: AppHandle) -> AppResult<Vec<String>> {
+    let key = get_groq_api_key_internal(&app)?
         .ok_or_else(|| "No Groq API key is saved yet. Save your key in Settings first.".to_string())?;
     let client = reqwest::Client::new();
     let resp = client
@@ -432,6 +539,44 @@ mod tests {
     fn masks_secrets_safely() {
         assert_eq!(mask_secret("gsk_1234567890abcd"), "gsk_••••••••abcd");
         assert_eq!(mask_secret("short"), "*****");
+    }
+
+    #[test]
+    fn reads_and_clears_groq_key_from_env_file() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let uniq = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp = std::env::temp_dir().join(format!("gmaps_cfg_test_{uniq}"));
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(
+            tmp.join(".env"),
+            "SCRAPER_PORT=8080\nGRAQ_API_KEY=\"gsk_typo_key_1234\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_groq_key_from_env_file(&tmp).as_deref(),
+            Some("gsk_typo_key_1234")
+        );
+
+        fs::write(
+            tmp.join(".env"),
+            "SCRAPER_PORT=8080\nGRAQ_API_KEY=\"gsk_typo\"\nGROQ_API_KEY=\"gsk_real_key_5678\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_groq_key_from_env_file(&tmp).as_deref(),
+            Some("gsk_real_key_5678")
+        );
+
+        clear_groq_key_in_env_file(&tmp);
+        assert!(read_groq_key_from_env_file(&tmp).is_none());
+        let remaining = fs::read_to_string(tmp.join(".env")).unwrap();
+        assert!(remaining.contains("SCRAPER_PORT=8080"));
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }
 

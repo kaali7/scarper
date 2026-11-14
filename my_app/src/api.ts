@@ -1,6 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
+
+export function formatError(err: unknown): string {
+  if (!err) return "";
+  if (typeof err === "string") return err;
+  if (err instanceof Error && err.message) return err.message;
+  if (
+    typeof err === "object" &&
+    "message" in err &&
+    (err as { message?: unknown }).message
+  ) {
+    return String((err as { message: unknown }).message);
+  }
+  return String(err);
+}
 import type {
   ChatResponse,
+  ChatSession,
   CityMatch,
   CsvFileEntry,
   CsvFilterOptions,
@@ -45,6 +60,11 @@ export const api = {
 
   deleteDbJob: (jobId: string) => invoke<void>("delete_db_job", { jobId }),
 
+  restartDbJob: (jobId: string) => invoke<string>("restart_db_job", { jobId }),
+
+  clearDbJobs: (failedOnly = false) =>
+    invoke<number>("clear_db_jobs", { failedOnly }),
+
   listCsvFiles: () => invoke<CsvFileEntry[]>("list_csv_files"),
 
   readCsvTable: (path: string, options?: CsvFilterOptions) =>
@@ -55,6 +75,12 @@ export const api = {
     destPath: string,
     options?: CsvFilterOptions,
   ) => invoke<number>("export_csv_file", { sourcePath, destPath, options }),
+
+  openFileExternally: (path: string) =>
+    invoke<void>("open_file_externally", { path }),
+
+  revealFileInFolder: (path: string) =>
+    invoke<void>("reveal_file_in_folder", { path }),
 
   listBusinessTypes: () => invoke<string[]>("list_business_types"),
 
@@ -68,5 +94,10 @@ export const api = {
 
   chatWithGroq: (messages: { role: "user" | "assistant"; content: string }[]) =>
     invoke<ChatResponse>("chat_with_groq", { messages }),
+
+  loadChatHistory: () => invoke<ChatSession[]>("load_chat_history"),
+
+  saveChatHistory: (sessions: ChatSession[]) =>
+    invoke<void>("save_chat_history", { sessions }),
 };
 

@@ -61,6 +61,7 @@ pub fn read_jobs_from_db(kit_root: &Path) -> AppResult<Vec<DbJobEntry>> {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|e| format!("Failed to open jobs.db: {e}"))?;
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
 
     let mut stmt = conn
         .prepare("SELECT id, name, date, status, data, error, progress FROM jobs ORDER BY rowid DESC")
@@ -161,16 +162,49 @@ pub fn list_db_jobs(app: AppHandle) -> AppResult<Vec<DbJobEntry>> {
     read_jobs_from_db(&kit_root)
 }
 
-#[tauri::command]
-pub async fn delete_db_job(app: AppHandle, job_id: String) -> AppResult<()> {
-    if !is_valid_uuid(&job_id) {
+pub fn delete_local_jobs(kit_root: &Path, job_ids: &[String]) -> AppResult<usize> {
+    if job_ids.is_empty() {
+        return Ok(0);
+    }
+    let db_path = jobs_db_path(kit_root);
+    if !db_path.is_file() {
+        return Err("jobs.db does not exist.".to_string());
+    }
+    let mut conn =
+        Connection::open(&db_path).map_err(|e| format!("Failed to open jobs.db: {e}"))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to start jobs.db transaction: {e}"))?;
+    let mut deleted = 0usize;
+    for job_id in job_ids {
+        if !is_valid_uuid(job_id) {
+            return Err(format!("Invalid job ID format: {job_id}"));
+        }
+        let affected = tx
+            .execute("DELETE FROM jobs WHERE id = ?", [job_id])
+            .map_err(|e| format!("Failed to delete job: {e}"))?;
+        if affected > 0 {
+            deleted += affected;
+            let csv_p = job_csv_path(kit_root, job_id);
+            let _ = fs::remove_file(&csv_p);
+            let _ = fs::remove_file(format!("{}.tmp", csv_p.display()));
+        }
+    }
+    tx.commit()
+        .map_err(|e| format!("Failed to commit jobs.db delete: {e}"))?;
+    Ok(deleted)
+}
+
+async fn delete_job_internal(
+    client: &reqwest::Client,
+    kit_root: &Path,
+    env: &crate::config::KitEnv,
+    job_id: &str,
+) -> AppResult<bool> {
+    if !is_valid_uuid(job_id) {
         return Err("Invalid job ID format.".to_string());
     }
-    let kit_root = resolve_kit_root(&app)?;
-    let env = read_kit_env(&kit_root);
     let url = format!("http://127.0.0.1:{}/api/v1/jobs/{job_id}", env.port);
-
-    let client = reqwest::Client::new();
     let mut req = client.delete(&url);
     if !env.api_key.is_empty() {
         req = req.header("X-API-Key", &env.api_key);
@@ -178,28 +212,115 @@ pub async fn delete_db_job(app: AppHandle, job_id: String) -> AppResult<()> {
 
     if let Ok(resp) = req.send().await {
         if resp.status().is_success() {
-            return Ok(());
+            return Ok(true);
         }
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(format!("Job {job_id} was not found."));
+            return Ok(false);
         }
     }
 
     // Engine is stopped: remove directly from jobs.db and delete its CSV files.
-    let db_path = jobs_db_path(&kit_root);
+    let deleted = delete_local_jobs(kit_root, &[job_id.to_string()])?;
+    Ok(deleted > 0)
+}
+
+#[tauri::command]
+pub async fn delete_db_job(app: AppHandle, job_id: String) -> AppResult<()> {
+    let kit_root = resolve_kit_root(&app)?;
+    let env = read_kit_env(&kit_root);
+    let client = reqwest::Client::new();
+    if delete_job_internal(&client, &kit_root, &env, &job_id).await? {
+        Ok(())
+    } else {
+        Err(format!("Job {job_id} was not found."))
+    }
+}
+
+#[tauri::command]
+pub async fn clear_db_jobs(app: AppHandle, failed_only: bool) -> AppResult<usize> {
+    let kit_root = resolve_kit_root(&app)?;
+    let jobs = read_jobs_from_db(&kit_root)?;
+    let target_ids: Vec<String> = jobs
+        .into_iter()
+        .filter(|j| !failed_only || j.status == "failed")
+        .map(|j| j.id)
+        .collect();
+    if target_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let env = read_kit_env(&kit_root);
+    let client = reqwest::Client::new();
+    let mut deleted = 0usize;
+    for job_id in &target_ids {
+        if delete_job_internal(&client, &kit_root, &env, job_id).await? {
+            deleted += 1;
+        }
+    }
+    Ok(deleted)
+}
+
+pub fn read_job_raw(
+    kit_root: &Path,
+    job_id: &str,
+) -> AppResult<(String, String, serde_json::Value, serde_json::Value)> {
+    if !is_valid_uuid(job_id) {
+        return Err("Invalid job ID format.".to_string());
+    }
+    let db_path = jobs_db_path(kit_root);
+    if !db_path.is_file() {
+        return Err("jobs.db does not exist.".to_string());
+    }
+    let conn = Connection::open_with_flags(
+        &db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| format!("Failed to open jobs.db: {e}"))?;
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+    let row = conn
+        .query_row(
+            "SELECT name, status, data, progress FROM jobs WHERE id = ?",
+            [job_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .map_err(|e| format!("Job {job_id} was not found: {e}"))?;
+    let data: serde_json::Value = serde_json::from_str(&row.2).unwrap_or_default();
+    let progress: serde_json::Value = serde_json::from_str(&row.3).unwrap_or_default();
+    Ok((row.0, row.1, data, progress))
+}
+
+pub fn reset_job_for_resume(kit_root: &Path, job_id: &str) -> AppResult<()> {
+    if !is_valid_uuid(job_id) {
+        return Err("Invalid job ID format.".to_string());
+    }
+    let db_path = jobs_db_path(kit_root);
     if !db_path.is_file() {
         return Err("jobs.db does not exist.".to_string());
     }
     let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open jobs.db: {e}"))?;
-    let affected = conn
-        .execute("DELETE FROM jobs WHERE id = ?", [&job_id])
-        .map_err(|e| format!("Failed to delete job: {e}"))?;
-    if affected == 0 {
-        return Err(format!("Job {job_id} was not found."));
+    let raw_prog: String = conn
+        .query_row("SELECT progress FROM jobs WHERE id = ?", [job_id], |r| {
+            r.get(0)
+        })
+        .map_err(|e| format!("Job {job_id} was not found: {e}"))?;
+    let mut prog: serde_json::Value =
+        serde_json::from_str(&raw_prog).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = prog.as_object_mut() {
+        obj.insert("resumes".to_string(), serde_json::json!(0));
     }
-    let csv_p = job_csv_path(&kit_root, &job_id);
-    let _ = fs::remove_file(&csv_p);
-    let _ = fs::remove_file(format!("{}.tmp", csv_p.display()));
+    let next_prog = serde_json::to_string(&prog).unwrap_or_else(|_| "{}".to_string());
+    conn.execute(
+        "UPDATE jobs SET status = 'working', error = '', progress = ? WHERE id = ?",
+        [&next_prog, job_id],
+    )
+    .map_err(|e| format!("Failed to reset job for resume: {e}"))?;
     Ok(())
 }
 
@@ -259,6 +380,58 @@ mod tests {
         assert_eq!(entries[0].places, 97);
         assert!(entries[0].csv_exists);
         assert!(entries[0].csv_size_bytes > 0);
+
+        let removed = delete_local_jobs(&tmp, &[jid.to_string()]).unwrap();
+        assert_eq!(removed, 1);
+        assert!(read_jobs_from_db(&tmp).unwrap().is_empty());
+        assert!(!data_dir.join(format!("{jid}.csv")).exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn reads_raw_job_and_resets_resume_counter() {
+        let uniq = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp = std::env::temp_dir().join(format!("gmaps_db_resume_{uniq}"));
+        let data_dir = tmp.join(".engine").join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let db_path = data_dir.join("jobs.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE jobs (id TEXT PRIMARY KEY, name TEXT NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', progress TEXT NOT NULL DEFAULT '{}')",
+            [],
+        )
+        .unwrap();
+        let jid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        conn.execute(
+            "INSERT INTO jobs (id, name, date, status, data, error, progress) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                jid,
+                "Medical Spas",
+                "2026-11-12T07:30:26+00:00",
+                "working",
+                r#"{"keywords":["Medical Spas","Dentists"],"depth":5}"#,
+                "interrupted",
+                r#"{"places":20,"percent":10,"resumes":3}"#,
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let (name, status, data, _prog) = read_job_raw(&tmp, jid).unwrap();
+        assert_eq!(name, "Medical Spas");
+        assert_eq!(status, "working");
+        assert_eq!(data["depth"].as_i64(), Some(5));
+
+        reset_job_for_resume(&tmp, jid).unwrap();
+        let (_n, status_after, _d, prog_after) = read_job_raw(&tmp, jid).unwrap();
+        assert_eq!(status_after, "working");
+        assert_eq!(prog_after["resumes"].as_i64(), Some(0));
+        assert_eq!(prog_after["places"].as_i64(), Some(20));
 
         let _ = fs::remove_dir_all(&tmp);
     }

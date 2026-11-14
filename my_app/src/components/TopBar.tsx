@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Play, RefreshCw, Square } from "lucide-react";
-import { api } from "../api";
+import { api, formatError } from "../api";
 
 export function TopBar() {
   const qc = useQueryClient();
@@ -28,16 +28,18 @@ export function TopBar() {
 
   const busy = startMut.isPending || stopMut.isPending || restartMut.isPending;
   const errMsg =
-    (startMut.error as Error | null)?.message ||
-    (stopMut.error as Error | null)?.message ||
-    (restartMut.error as Error | null)?.message;
+    formatError(startMut.error) ||
+    formatError(stopMut.error) ||
+    formatError(restartMut.error);
 
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/80 px-5 py-3">
       <div className="flex items-center gap-3">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15 text-sm font-bold text-emerald-400">
-          GM
-        </span>
+        <img
+          src="/icon.png"
+          alt="Google Maps Scraper"
+          className="h-8 w-8 rounded-lg object-contain"
+        />
         <div>
           <h1 className="text-sm font-semibold tracking-tight text-slate-100">
             Google Maps Scraper

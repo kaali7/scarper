@@ -1,8 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { useQueryClient } from "@tanstack/react-query";
-import { Database, MessageSquare, Search, Settings } from "lucide-react";
-import { api } from "./api";
+import { AlertTriangle, Database, MessageSquare, Search, Settings } from "lucide-react";
 import { AiChat } from "./components/AiChat";
 import { DbCsvExplorer } from "./components/DbCsvExplorer";
 import { SearchBuilder } from "./components/SearchBuilder";
@@ -22,24 +20,17 @@ const TABS: { id: TabId; label: string; icon: typeof Search }[] = [
   { id: "settings", label: "Settings & Logs", icon: Settings },
 ];
 
+export function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 export default function App() {
-  const qc = useQueryClient();
   const { activeTab, setActiveTab, upsertProgress, pushToolEvent } =
     useAppStore();
+  const inTauri = isTauriRuntime();
 
   useEffect(() => {
-    // Auto-start engine quietly if stopped and Python + Chrome are available.
-    api
-      .getEngineStatus()
-      .then((st) => {
-        if (!st.running && !st.foreignPortBusy && st.python) {
-          return api.startEngine().then((next) => {
-            qc.setQueryData(["engine-status"], next);
-          });
-        }
-        return undefined;
-      })
-      .catch(() => {});
+    if (!inTauri) return;
 
     const unlistenProgress = listen<LiveJobProgressEvent>(
       "scrape://progress",
@@ -58,11 +49,30 @@ export default function App() {
       unlistenProgress.then((fn) => fn());
       unlistenChat.then((fn) => fn());
     };
-  }, [qc, upsertProgress, pushToolEvent]);
+  }, [inTauri, upsertProgress, pushToolEvent]);
 
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
       <TopBar />
+
+      {!inTauri && (
+        <div className="flex items-center gap-2 border-b border-amber-500/40 bg-amber-500/15 px-5 py-2 text-xs text-amber-200">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+          <span>
+            You are viewing the Vite frontend inside a web browser where Tauri
+            backend commands (Engine Stop/Start, jobs.db, CSV files, Groq AI) are
+            unavailable. Launch the desktop window with{" "}
+            <code className="rounded bg-slate-900 px-1.5 py-0.5 font-mono">
+              npm run tauri dev
+            </code>{" "}
+            (or{" "}
+            <code className="rounded bg-slate-900 px-1.5 py-0.5 font-mono">
+              npm.cmd run tauri dev
+            </code>{" "}
+            in PowerShell).
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         <nav className="flex w-52 shrink-0 flex-col gap-1 border-r border-slate-800 bg-slate-900/40 p-3">

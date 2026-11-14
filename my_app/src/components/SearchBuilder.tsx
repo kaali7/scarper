@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -13,7 +13,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { api } from "../api";
+import { api, formatError } from "../api";
 import { useAppStore } from "../store";
 import type { CityInput, CityMatch, ScrapeRunResult } from "../types";
 
@@ -32,7 +32,14 @@ const LEAD_FIELDS = [
 
 export function SearchBuilder() {
   const qc = useQueryClient();
-  const { openCsvInViewer, liveProgress, clearProgress } = useAppStore();
+  const {
+    openCsvInViewer,
+    liveProgress,
+    clearProgress,
+    setSelectedJobId,
+    clearSelectedCsv,
+  } = useAppStore();
+  const [jobSubmitted, setJobSubmitted] = useState(false);
 
   const [preset, setPreset] = useState<ModePreset>("phone_only");
   const [kwInput, setKwInput] = useState("");
@@ -156,6 +163,7 @@ export function SearchBuilder() {
     mutationFn: async () => {
       clearProgress();
       setLastResult(null);
+      setJobSubmitted(false);
       const parsedGrid = grid.trim() ? Number(grid.trim()) : undefined;
       const fields =
         fieldsMode === "phone_only"
@@ -190,12 +198,25 @@ export function SearchBuilder() {
           deepScan,
           tech,
         },
-        true,
+        false,  // Don't block the Tauri thread waiting for completion — progress arrives via scrape://progress events
       );
     },
     onSuccess: (res) => {
-      setLastResult(res);
       setConfirmLarge(false);
+      // For CLI-mode jobs (grid/deepScan/tech/browserSites), the backend still
+      // runs synchronously and returns a full result with exportedCsvPath — show it.
+      if (res.exportedCsvPath) {
+        setLastResult(res);
+        setJobSubmitted(false);
+      } else {
+        // Engine-API job submitted asynchronously; progress arrives via
+        // scrape://progress events. Show live progress until allDone fires.
+        setJobSubmitted(true);
+        if (res.jobIds && res.jobIds.length > 0) {
+          setSelectedJobId(res.jobIds[0]);
+          clearSelectedCsv();
+        }
+      }
       qc.invalidateQueries({ queryKey: ["db-jobs"] });
       qc.invalidateQueries({ queryKey: ["csv-files"] });
       qc.invalidateQueries({ queryKey: ["engine-status"] });
@@ -215,6 +236,36 @@ export function SearchBuilder() {
   };
 
   const progressList = Object.values(liveProgress);
+
+  // When all submitted jobs have finished (ok/failed), refresh and show result.
+
+  // Detect completion: all progress events reached a terminal status
+  const allDone =
+    jobSubmitted &&
+    progressList.length > 0 &&
+    progressList.every((p) => p.status === "ok" || p.status === "failed");
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
+  useEffect(() => {
+    if (!allDone) return;
+    setJobSubmitted(false);
+    qc.invalidateQueries({ queryKey: ["db-jobs"] });
+    qc.invalidateQueries({ queryKey: ["csv-files"] });
+    qc.invalidateQueries({ queryKey: ["engine-status"] });
+    // Build a summary result from live progress data
+    const totalPlaces = progressList.reduce((sum, p) => sum + Number(p.places), 0);
+    const warnings = progressList
+      .filter((p) => p.error)
+      .map((p) => `${p.cityLabel || p.jobId.slice(0, 8)}: ${p.error}`);
+    setLastResult({
+      jobIds: progressList.map((p) => p.jobId),
+      primaryCsvPath: null,
+      exportedCsvPath: null,
+      exportedRows: totalPlaces,
+      totalPlaces,
+      warnings,
+    });
+  }, [allDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-5">
@@ -684,14 +735,19 @@ export function SearchBuilder() {
           </span>
           <button
             type="button"
-            disabled={scrapeMut.isPending || keywords.length === 0}
+            disabled={scrapeMut.isPending || jobSubmitted || keywords.length === 0}
             onClick={handleStart}
             className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
           >
             {scrapeMut.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Scraping…
+                Submitting…
+              </>
+            ) : jobSubmitted ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Running…
               </>
             ) : (
               <>
@@ -704,14 +760,16 @@ export function SearchBuilder() {
       </section>
 
       {/* Live Progress */}
-      {(scrapeMut.isPending || progressList.length > 0) && (
+      {(scrapeMut.isPending || jobSubmitted || progressList.length > 0) && (
         <section className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Live Scrape Progress
           </h3>
           {progressList.length === 0 && (
             <p className="text-xs text-slate-400">
-              Starting engine / geocoding cities…
+              {scrapeMut.isPending
+                ? "Starting engine / geocoding cities…"
+                : "Job submitted — waiting for first progress event…"}
             </p>
           )}
           {progressList.map((p) => (
@@ -745,7 +803,7 @@ export function SearchBuilder() {
       {/* Error / Completion */}
       {scrapeMut.error && (
         <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">
-          {(scrapeMut.error as Error).message}
+          {formatError(scrapeMut.error)}
         </div>
       )}
 

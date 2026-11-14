@@ -170,6 +170,13 @@ export interface ChatMessage {
   createdAt: number;
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: ChatMessage[];
+}
+
 export interface ChatResponse {
   assistantMessage: string;
   toolTraces: ToolTrace[];

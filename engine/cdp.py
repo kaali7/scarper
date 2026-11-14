@@ -274,13 +274,25 @@ class Page:
     def navigate(self, url, timeout=None):
         timeout = nav_timeout() if timeout is None else timeout
         loaded = self.cdp.subscribe("Page.loadEventFired", self.sid)
+        self.cdp.subscribe("Page.domContentEventFired", self.sid, q=loaded)
         try:
             r = self.send("Page.navigate", {"url": url}, timeout=timeout)
             if r.get("errorText"):
                 raise CDPError(f"navigate {url}: {r['errorText']}")
-            self.cdp.wait_event("Page.loadEventFired", self.sid, timeout, q=loaded)
+            try:
+                self.cdp.wait_event("Page.loadEventFired", self.sid, timeout, q=loaded)
+            except CDPError:
+                ready = None
+                try:
+                    ready = self.eval("document.readyState", timeout=5)
+                except Exception:
+                    pass
+                if ready in ("interactive", "complete"):
+                    return
+                raise
         finally:
             self.cdp.unsubscribe("Page.loadEventFired", loaded, self.sid)
+            self.cdp.unsubscribe("Page.domContentEventFired", loaded, self.sid)
 
     def eval(self, expression, timeout=None):
         """The JSON value of a JavaScript expression (awaited if it is a promise)."""

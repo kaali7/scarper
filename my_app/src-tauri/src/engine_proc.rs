@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -19,12 +19,16 @@ const ENGINE_HEADER_PREFIX: &str = "gmskit-engine/";
 
 pub struct EngineState {
     pub child: Mutex<Option<Child>>,
+    pub lifecycle_lock: tokio::sync::Mutex<()>,
+    pub cached_env: Mutex<Option<(String, Option<String>, Option<PythonInfo>, Option<String>)>>,
 }
 
 impl Default for EngineState {
     fn default() -> Self {
         Self {
             child: Mutex::new(None),
+            lifecycle_lock: tokio::sync::Mutex::new(()),
+            cached_env: Mutex::new(None),
         }
     }
 }
@@ -124,6 +128,31 @@ pub fn detect_chrome(kit_root: &Path, python_bin: Option<&str>) -> Option<String
     None
 }
 
+fn get_cached_tools(
+    state: &EngineState,
+    kit_root: &Path,
+    python_override: Option<&str>,
+    force_refresh: bool,
+) -> (Option<PythonInfo>, Option<String>) {
+    let root_str = kit_root.to_string_lossy().to_string();
+    let over = python_override.map(|s| s.to_string());
+    if !force_refresh {
+        if let Ok(guard) = state.cached_env.lock() {
+            if let Some((r, o, py, ch)) = guard.as_ref() {
+                if *r == root_str && *o == over {
+                    return (py.clone(), ch.clone());
+                }
+            }
+        }
+    }
+    let py = detect_python(python_override);
+    let ch = detect_chrome(kit_root, py.as_ref().map(|p| p.executable.as_str()));
+    if let Ok(mut guard) = state.cached_env.lock() {
+        *guard = Some((root_str, over, py.clone(), ch.clone()));
+    }
+    (py, ch)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum ProbeResult {
     Ours(String),
@@ -179,17 +208,64 @@ fn check_managed_alive(state: &EngineState) -> bool {
     false
 }
 
-pub async fn status_internal(app: &AppHandle) -> AppResult<EngineStatus> {
+fn desktop_pid_file(kit_root: &Path) -> PathBuf {
+    kit_root.join(".engine").join("desktop-engine.pid")
+}
+
+fn kill_pid_tree(pid: u32) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = new_hidden_command("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output();
+    }
+}
+
+fn find_serve_py_pids_for_port(port: u16) -> Vec<u32> {
+    #[cfg(target_os = "windows")]
+    {
+        let ps = format!(
+            "$pids = Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; \
+             if ($pids) {{ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{ ($pids -contains $_.ProcessId) -and ($_.CommandLine -match 'serve\\.py') }} | Select-Object -ExpandProperty ProcessId }}"
+        );
+        if let Ok(out) = new_hidden_command("powershell")
+            .args(["-NoProfile", "-Command", &ps])
+            .output()
+        {
+            if out.status.success() {
+                return String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = port;
+        Vec::new()
+    }
+}
+
+async fn status_unlocked(app: &AppHandle, refresh_tools: bool) -> AppResult<EngineStatus> {
     let kit_root = resolve_kit_root(app)?;
     let cfg = load_config(app);
     let env = read_kit_env(&kit_root);
     let state = app.state::<EngineState>();
     let managed_by_app = check_managed_alive(&state);
 
-    let python = detect_python(cfg.python_override.as_deref());
-    let chrome_path = detect_chrome(
+    let (python, chrome_path) = get_cached_tools(
+        &state,
         &kit_root,
-        python.as_ref().map(|p| p.executable.as_str()),
+        cfg.python_override.as_deref(),
+        refresh_tools,
     );
 
     let (running, foreign_port_busy, engine_version) =
@@ -211,8 +287,8 @@ pub async fn status_internal(app: &AppHandle) -> AppResult<EngineStatus> {
     })
 }
 
-pub async fn start_internal(app: &AppHandle) -> AppResult<EngineStatus> {
-    let cur = status_internal(app).await?;
+async fn start_unlocked(app: &AppHandle) -> AppResult<EngineStatus> {
+    let cur = status_unlocked(app, true).await?;
     if cur.running {
         return Ok(cur);
     }
@@ -251,6 +327,10 @@ pub async fn start_internal(app: &AppHandle) -> AppResult<EngineStatus> {
     let child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start engine/serve.py: {e}"))?;
+    let child_pid = child.id();
+
+    let _ = fs::create_dir_all(kit_root.join(".engine"));
+    let _ = fs::write(desktop_pid_file(&kit_root), child_pid.to_string());
 
     {
         let state = app.state::<EngineState>();
@@ -264,7 +344,7 @@ pub async fn start_internal(app: &AppHandle) -> AppResult<EngineStatus> {
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
         if let ProbeResult::Ours(_) = probe_engine(env.port, &env.api_key).await {
-            return status_internal(app).await;
+            return status_unlocked(app, false).await;
         }
         if !check_managed_alive(&app.state::<EngineState>()) {
             let tail = read_log_tail(&kit_root, 20).unwrap_or_default();
@@ -279,11 +359,75 @@ pub async fn start_internal(app: &AppHandle) -> AppResult<EngineStatus> {
     Err("Timed out waiting for the local engine to answer on localhost.".to_string())
 }
 
+async fn stop_unlocked(app: &AppHandle) -> AppResult<EngineStatus> {
+    let state = app.state::<EngineState>();
+    let kit_root = resolve_kit_root(app)?;
+    let env = read_kit_env(&kit_root);
+
+    // 1. Stop process directly owned by this app instance (tree-kill on Windows).
+    stop_managed_process(&state);
+
+    // 2. Clean up orphaned desktop-engine.pid from an earlier dev reload/crash.
+    let pid_file = desktop_pid_file(&kit_root);
+    if let Ok(raw) = fs::read_to_string(&pid_file) {
+        if let Ok(pid) = raw.trim().parse::<u32>() {
+            kill_pid_tree(pid);
+        }
+        let _ = fs::remove_file(&pid_file);
+    }
+
+    // 3. If engine still answers on port, try scripts/engine.py stop, then port listener tree-kill.
+    if let ProbeResult::Ours(_) = probe_engine(env.port, &env.api_key).await {
+        let cfg = load_config(app);
+        if let Some(py) = detect_python(cfg.python_override.as_deref()) {
+            let _ = new_hidden_command(&py.executable)
+                .args(["scripts/engine.py", "stop"])
+                .current_dir(&kit_root)
+                .output();
+        }
+    }
+
+    if let ProbeResult::Ours(_) = probe_engine(env.port, &env.api_key).await {
+        for pid in find_serve_py_pids_for_port(env.port) {
+            kill_pid_tree(pid);
+        }
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if probe_engine(env.port, &env.api_key).await == ProbeResult::Down {
+            return status_unlocked(app, false).await;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    if let ProbeResult::Ours(_) = probe_engine(env.port, &env.api_key).await {
+        return Err(format!(
+            "Engine on port {} is still responding (if running inside Docker, run 'docker compose stop').",
+            env.port
+        ));
+    }
+
+    status_unlocked(app, false).await
+}
+
+pub async fn status_internal(app: &AppHandle) -> AppResult<EngineStatus> {
+    status_unlocked(app, false).await
+}
+
+pub async fn start_internal(app: &AppHandle) -> AppResult<EngineStatus> {
+    let state = app.state::<EngineState>();
+    let _guard = state.lifecycle_lock.lock().await;
+    start_unlocked(app).await
+}
+
 pub fn stop_managed_process(state: &EngineState) -> bool {
     let Ok(mut guard) = state.child.lock() else {
         return false;
     };
     if let Some(mut child) = guard.take() {
+        let pid = child.id();
+        kill_pid_tree(pid);
         let _ = child.kill();
         let _ = child.wait();
         return true;
@@ -305,7 +449,7 @@ pub fn read_log_tail(kit_root: &Path, max_lines: usize) -> AppResult<String> {
 
 #[tauri::command]
 pub async fn get_engine_status(app: AppHandle) -> AppResult<EngineStatus> {
-    status_internal(&app).await
+    status_unlocked(&app, false).await
 }
 
 #[tauri::command]
@@ -316,28 +460,16 @@ pub async fn start_engine(app: AppHandle) -> AppResult<EngineStatus> {
 #[tauri::command]
 pub async fn stop_engine(app: AppHandle) -> AppResult<EngineStatus> {
     let state = app.state::<EngineState>();
-    let stopped_managed = stop_managed_process(&state);
-
-    if !stopped_managed {
-        // Attempt graceful CLI stop if engine was started outside this app.
-        let kit_root = resolve_kit_root(&app)?;
-        let cfg = load_config(&app);
-        if let Some(py) = detect_python(cfg.python_override.as_deref()) {
-            let _ = new_hidden_command(&py.executable)
-                .args(["scripts/engine.py", "stop"])
-                .current_dir(&kit_root)
-                .output();
-        }
-    }
-
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    status_internal(&app).await
+    let _guard = state.lifecycle_lock.lock().await;
+    stop_unlocked(&app).await
 }
 
 #[tauri::command]
 pub async fn restart_engine(app: AppHandle) -> AppResult<EngineStatus> {
-    let _ = stop_engine(app.clone()).await;
-    start_internal(&app).await
+    let state = app.state::<EngineState>();
+    let _guard = state.lifecycle_lock.lock().await;
+    let _ = stop_unlocked(&app).await;
+    start_unlocked(&app).await
 }
 
 #[tauri::command]
@@ -363,4 +495,3 @@ mod tests {
         );
     }
 }
-

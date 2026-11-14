@@ -284,6 +284,8 @@ class Store:
         self.folder = folder
         self.lock = threading.RLock()
         self.db = sqlite3.connect(os.path.join(folder, "jobs.db"), check_same_thread=False)
+        self.db.execute("PRAGMA journal_mode = WAL")
+        self.db.execute("PRAGMA busy_timeout = 5000")
         with self.lock, self.db:
             self.db.execute("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
                             "date TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, "

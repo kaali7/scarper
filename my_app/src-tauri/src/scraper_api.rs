@@ -7,7 +7,9 @@ use tauri::{AppHandle, Emitter};
 
 use crate::config::{load_config, read_kit_env, resolve_kit_root};
 use crate::csv_io::{sanitize_output_filename, write_filtered_export, CsvFilterOptions};
-use crate::db::job_csv_path;
+use crate::db::{
+    delete_local_jobs, job_csv_path, read_job_raw, reset_job_for_resume,
+};
 use crate::engine_proc::{detect_python, start_internal, status_internal};
 use crate::error::AppResult;
 
@@ -575,6 +577,47 @@ pub async fn run_scrape_and_export(
     }
 
     if !wait_for_completion {
+        let app_handle = app.clone();
+        let env_port = env.port;
+        let env_api_key = env.api_key.clone();
+        let job_ids_clone = job_ids.clone();
+        let targets_clone = targets.clone();
+
+        tokio::spawn(async move {
+            let total_deadline = Instant::now() + Duration::from_secs(max_time * (targets_clone.len().max(1) as u64) + 180);
+            for (idx, jid) in job_ids_clone.iter().enumerate() {
+                let city_label = targets_clone
+                    .get(idx)
+                    .map(|t| t.0.clone())
+                    .unwrap_or_default();
+                loop {
+                    if let Ok(st) = fetch_job_status_internal(env_port, &env_api_key, jid).await {
+                        let _ = app_handle.emit(
+                            "scrape://progress",
+                            LiveJobProgressEvent {
+                                job_id: jid.clone(),
+                                city_label: city_label.clone(),
+                                status: st.status.clone(),
+                                stage: st.stage.clone(),
+                                keywords_done: st.keywords_done,
+                                keywords_total: st.keywords_total,
+                                places: st.places,
+                                percent: st.percent,
+                                error: st.error.clone(),
+                            },
+                        );
+                        if st.status == "ok" || st.status == "failed" {
+                            break;
+                        }
+                    }
+                    if Instant::now() >= total_deadline {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1500)).await;
+                }
+            }
+        });
+
         let first_csv = job_ids
             .first()
             .map(|id| job_csv_path(&kit_root, id).to_string_lossy().to_string());
@@ -699,5 +742,107 @@ pub async fn start_scrape_job(
     wait_for_completion: Option<bool>,
 ) -> AppResult<ScrapeRunResult> {
     run_scrape_and_export(&app, request, wait_for_completion.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn restart_db_job(app: AppHandle, job_id: String) -> AppResult<String> {
+    let kit_root = resolve_kit_root(&app)?;
+    let (name, status, data, progress) = read_job_raw(&kit_root, &job_id)?;
+    let eng_status = status_internal(&app).await?;
+    let env = read_kit_env(&kit_root);
+
+    if matches!(status.as_str(), "working" | "pending") {
+        if !eng_status.running {
+            reset_job_for_resume(&kit_root, &job_id)?;
+            start_internal(&app).await?;
+            return Ok(job_id);
+        }
+        if let Ok(live) = fetch_job_status_internal(env.port, &env.api_key, &job_id).await {
+            if matches!(live.status.as_str(), "working" | "pending") {
+                return Ok(job_id);
+            }
+        }
+    }
+
+    if !eng_status.running {
+        start_internal(&app).await?;
+    }
+
+    let keywords = data["keywords"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if keywords.is_empty() {
+        return Err("Saved job has no keywords to restart.".to_string());
+    }
+
+    let mut body = serde_json::json!({
+        "name": name,
+        "keywords": keywords,
+        "lang": data["lang"].as_str().unwrap_or("en"),
+        "zoom": data["zoom"].as_u64().unwrap_or(15),
+        "depth": data["depth"].as_u64().unwrap_or(5),
+        "max_time": data["max_time"].as_u64().unwrap_or(600),
+        "email": data["email"].as_bool().unwrap_or(false),
+        "socials": data["socials"].as_bool().unwrap_or(false),
+        "verify_emails": data["verify_emails"].as_bool().unwrap_or(false),
+        "browser_sites": data["browser_sites"].as_bool().unwrap_or(false),
+        "reviews_max": data["reviews_max"].as_u64().unwrap_or(0),
+        "fast_mode": data["fast_mode"].as_bool().unwrap_or(false),
+    });
+    for field in ["country", "lat", "lon"] {
+        if let Some(val) = data[field].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            body[field] = serde_json::Value::String(val.to_string());
+        }
+    }
+    if let Some(radius) = data["radius"].as_u64() {
+        body["radius"] = serde_json::json!(radius);
+    }
+    if let Some(proxies) = data["proxies"].as_array() {
+        if !proxies.is_empty() {
+            body["proxies"] = serde_json::Value::Array(proxies.clone());
+        }
+    }
+
+    let client = engine_client()?;
+    let mut post = client
+        .post(format!("http://127.0.0.1:{}/api/v1/jobs", env.port))
+        .json(&body);
+    if !env.api_key.is_empty() {
+        post = post.header("X-API-Key", &env.api_key);
+    }
+    let resp = post
+        .send()
+        .await
+        .map_err(|e| format!("Failed to restart job: {e}"))?;
+    if !resp.status().is_success() {
+        let code = resp.status();
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!("Engine rejected job restart (HTTP {code}): {err_text}"));
+    }
+    let created: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid restart-job response: {e}"))?;
+    let new_jid = created["id"]
+        .as_str()
+        .ok_or_else(|| "Engine response missing restarted job id.".to_string())?
+        .to_string();
+
+    if status == "failed" && progress["places"].as_i64().unwrap_or(0) == 0 {
+        let mut del = client.delete(format!("http://127.0.0.1:{}/api/v1/jobs/{job_id}", env.port));
+        if !env.api_key.is_empty() {
+            del = del.header("X-API-Key", &env.api_key);
+        }
+        if del.send().await.is_err() {
+            let _ = delete_local_jobs(&kit_root, &[job_id]);
+        }
+    }
+
+    Ok(new_jid)
 }
 

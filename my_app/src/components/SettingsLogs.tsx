@@ -10,12 +10,13 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
-import { api } from "../api";
+import { api, formatError } from "../api";
 
 const DEFAULT_GROQ_MODELS = [
-  "llama-3.3-70b-versatile",
+  "qwen/qwen3.8-27b",
+  "qwen/qwen3-32b",
   "llama-3.1-8b-instant",
-  "meta-llama/llama-4-scout-17b-16e-instruct",
+  "llama-3.3-70b-versatile",
 ];
 
 export function SettingsLogs() {
@@ -37,7 +38,7 @@ export function SettingsLogs() {
 
   const [kitRoot, setKitRoot] = useState("");
   const [pythonOverride, setPythonOverride] = useState("");
-  const [groqModel, setGroqModel] = useState("llama-3.3-70b-versatile");
+  const [groqModel, setGroqModel] = useState("qwen/qwen3.8-27b");
   const [port, setPort] = useState(8080);
   const [navTimeout, setNavTimeout] = useState(90);
   const [headless, setHeadless] = useState(true);
@@ -59,8 +60,12 @@ export function SettingsLogs() {
   }, [settings]);
 
   const saveSettingsMut = useMutation({
-    mutationFn: () =>
-      api.saveDesktopSettings({
+    mutationFn: async () => {
+      if (groqKeyInput.trim()) {
+        await api.setGroqApiKey(groqKeyInput.trim());
+        setGroqKeyInput("");
+      }
+      return api.saveDesktopSettings({
         kitRoot,
         pythonOverride: pythonOverride.trim() || null,
         groqModel,
@@ -71,7 +76,8 @@ export function SettingsLogs() {
           navTimeout,
           noUpdateCheck,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["engine-status"] });
@@ -112,10 +118,10 @@ export function SettingsLogs() {
   };
 
   const errMsg =
-    (saveSettingsMut.error as Error | null)?.message ||
-    (saveKeyMut.error as Error | null)?.message ||
-    (clearKeyMut.error as Error | null)?.message ||
-    (testGroqMut.error as Error | null)?.message;
+    formatError(saveSettingsMut.error) ||
+    formatError(saveKeyMut.error) ||
+    formatError(clearKeyMut.error) ||
+    formatError(testGroqMut.error);
 
   const modelOptions = Array.from(
     new Set([...DEFAULT_GROQ_MODELS, ...availableModels, groqModel].filter(Boolean)),
@@ -187,6 +193,12 @@ export function SettingsLogs() {
             </button>
           )}
         </div>
+
+        <p className="text-[11px] text-slate-400">
+          Reads your Groq key from Windows Credential Store, local AppData,{" "}
+          <code className="text-slate-300">GROQ_API_KEY</code> env var, or{" "}
+          <code className="text-slate-300">.env</code> in the scraper kit folder.
+        </p>
 
         <div>
           <label className="mb-1 block text-xs text-slate-400">

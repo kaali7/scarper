@@ -7,16 +7,18 @@ import {
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
+  History,
   KeyRound,
   Loader2,
+  MessageSquarePlus,
   Send,
   Trash2,
   User,
   Wrench,
 } from "lucide-react";
-import { api } from "../api";
+import { api, formatError } from "../api";
 import { useAppStore } from "../store";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, ChatSession } from "../types";
 
 const STARTER_PROMPTS = [
   "Search coffee shops and dress shops in Navi Mumbai and Thane, India. Only phone number not email. Give me name and phone number.",
@@ -24,10 +26,32 @@ const STARTER_PROMPTS = [
   "Filter navi-mumbai-thane-leads.csv to show the first 10 businesses.",
 ];
 
+function deriveSessionTitle(messages: ChatMessage[]): string {
+  const firstUser = messages.find((m) => m.role === "user")?.content.trim() ?? "";
+  if (!firstUser) return "New Chat";
+  return firstUser.length > 42 ? `${firstUser.slice(0, 42)}…` : firstUser;
+}
+
+function formatSessionDate(ts: number): string {
+  try {
+    return new Date(ts).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export function AiChat() {
   const qc = useQueryClient();
   const {
+    activeChatId,
+    setActiveChatId,
     chatMessages,
+    setChatMessages,
     addChatMessage,
     clearChat,
     toolStream,
@@ -37,15 +61,58 @@ export function AiChat() {
   } = useAppStore();
 
   const [input, setInput] = useState("");
+  const [showHistory, setShowHistory] = useState(true);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>(
     {},
   );
   const bottomRef = useRef<HTMLDivElement>(null);
+  const hydratedRef = useRef(false);
 
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: api.getSettings,
   });
+
+  const { data: savedSessions = [] } = useQuery({
+    queryKey: ["chat-history"],
+    queryFn: async () => {
+      try {
+        return await api.loadChatHistory();
+      } catch {
+        return [];
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (hydratedRef.current || savedSessions.length === 0) return;
+    hydratedRef.current = true;
+    const state = useAppStore.getState();
+    if (!state.activeChatId && state.chatMessages.length === 0) {
+      const latest = savedSessions[0];
+      setActiveChatId(latest.id);
+      setChatMessages(latest.messages);
+    }
+  }, [savedSessions, setActiveChatId, setChatMessages]);
+
+  const persistSession = (sessionId: string, messages: ChatMessage[]) => {
+    const prev = qc.getQueryData<ChatSession[]>(["chat-history"]) ?? savedSessions;
+    const without = prev.filter((s) => s.id !== sessionId);
+    const next =
+      messages.length > 0
+        ? [
+            {
+              id: sessionId,
+              title: deriveSessionTitle(messages),
+              updatedAt: Date.now(),
+              messages,
+            },
+            ...without,
+          ]
+        : without;
+    qc.setQueryData(["chat-history"], next);
+    api.saveChatHistory(next).catch(() => {});
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -53,6 +120,12 @@ export function AiChat() {
 
   const sendMut = useMutation({
     mutationFn: async (prompt: string) => {
+      const state = useAppStore.getState();
+      const sessionId = state.activeChatId ?? crypto.randomUUID();
+      if (!state.activeChatId) {
+        setActiveChatId(sessionId);
+      }
+      const prior = state.chatMessages;
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "user",
@@ -60,38 +133,84 @@ export function AiChat() {
         createdAt: Date.now(),
       };
       addChatMessage(userMsg);
+      persistSession(sessionId, [...prior, userMsg]);
       clearToolStream();
 
-      const history = [...chatMessages, userMsg].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-      return api.chatWithGroq(history);
+      const history = [...prior, userMsg]
+        .filter((m) => !(m.role === "assistant" && m.content.startsWith("Error:")))
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+      const res = await api.chatWithGroq(history);
+      return { res, sessionId };
     },
-    onSuccess: (res) => {
-      addChatMessage({
+    onSuccess: ({ res, sessionId }) => {
+      const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: res.assistantMessage,
         toolTraces: res.toolTraces,
         artifacts: res.artifacts,
         createdAt: Date.now(),
-      });
+      };
+      addChatMessage(assistantMsg);
+      persistSession(sessionId, useAppStore.getState().chatMessages);
       clearToolStream();
       qc.invalidateQueries({ queryKey: ["db-jobs"] });
       qc.invalidateQueries({ queryKey: ["csv-files"] });
       qc.invalidateQueries({ queryKey: ["engine-status"] });
     },
     onError: (err) => {
-      addChatMessage({
+      const state = useAppStore.getState();
+      const sessionId = state.activeChatId;
+      const errMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `Error: ${(err as Error).message}`,
+        content: `Error: ${formatError(err) || "Request failed"}`,
         createdAt: Date.now(),
-      });
+      };
+      addChatMessage(errMsg);
+      if (sessionId) {
+        persistSession(sessionId, useAppStore.getState().chatMessages);
+      }
       clearToolStream();
     },
   });
+
+  const handleNewChat = () => {
+    if (sendMut.isPending) return;
+    hydratedRef.current = true;
+    clearChat();
+    setActiveChatId(crypto.randomUUID());
+  };
+
+  const handleSelectSession = (session: ChatSession) => {
+    if (sendMut.isPending) return;
+    hydratedRef.current = true;
+    setActiveChatId(session.id);
+    setChatMessages(session.messages);
+  };
+
+  const handleDeleteSession = (sessionId: string) => {
+    if (sendMut.isPending) return;
+    hydratedRef.current = true;
+    const next = savedSessions.filter((s) => s.id !== sessionId);
+    qc.setQueryData(["chat-history"], next);
+    api.saveChatHistory(next).catch(() => {});
+    if (activeChatId === sessionId) {
+      clearChat();
+    }
+  };
+
+  const handleClearActive = () => {
+    if (sendMut.isPending) return;
+    hydratedRef.current = true;
+    if (activeChatId) {
+      persistSession(activeChatId, []);
+    }
+    clearChat();
+  };
 
   const submitPrompt = (text?: string) => {
     const q = (text ?? input).trim();
@@ -101,29 +220,114 @@ export function AiChat() {
   };
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-emerald-400" />
-          <h2 className="text-sm font-semibold text-slate-100">
-            Groq AI Assistant
-          </h2>
-          {settings && (
-            <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[11px] text-slate-300">
-              {settings.config.groqModel}
+    <div className="mx-auto flex h-full max-w-6xl gap-3 overflow-hidden">
+      {showHistory && (
+        <aside className="flex w-64 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+          <div className="mb-2.5 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Chat History ({savedSessions.length})
             </span>
-          )}
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-500"
+              title="Start a fresh conversation"
+            >
+              <MessageSquarePlus className="h-3 w-3" />
+              New Chat
+            </button>
+          </div>
+          <div className="flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+            {savedSessions.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-800 p-3 text-center text-[11px] text-slate-500">
+                Your conversations will be saved here automatically.
+              </p>
+            ) : (
+              savedSessions.map((session) => {
+                const isActive = activeChatId === session.id;
+                return (
+                  <div
+                    key={session.id}
+                    className={`group flex items-start justify-between gap-1.5 rounded-lg border p-2 transition ${
+                      isActive
+                        ? "border-emerald-500/70 bg-emerald-500/10"
+                        : "border-slate-800 bg-slate-950/50 hover:border-slate-700"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSession(session)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <div className="truncate text-xs font-medium text-slate-100">
+                        {session.title}
+                      </div>
+                      <div className="mt-1 text-[10px] text-slate-500">
+                        {session.messages.length} msgs ·{" "}
+                        {formatSessionDate(session.updatedAt)}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSession(session.id)}
+                      className="rounded p-1 text-slate-500 opacity-70 transition hover:bg-rose-500/20 hover:text-rose-300 group-hover:opacity-100"
+                      aria-label={`Delete chat ${session.title}`}
+                      title="Delete conversation"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </aside>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="rounded border border-slate-700 p-1 text-slate-300 hover:bg-slate-800"
+              aria-label="Toggle chat history"
+              title={showHistory ? "Hide chat history" : "Show chat history"}
+            >
+              <History className="h-3.5 w-3.5" />
+            </button>
+            <Bot className="h-4 w-4 text-emerald-400" />
+            <h2 className="text-sm font-semibold text-slate-100">
+              Groq AI Assistant
+            </h2>
+            {settings && (
+              <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[11px] text-slate-300">
+                {settings.config.groqModel}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {!showHistory && (
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20"
+              >
+                <MessageSquarePlus className="h-3.5 w-3.5" />
+                New Chat
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleClearActive}
+              className="inline-flex items-center gap-1 rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={clearChat}
-          className="inline-flex items-center gap-1 rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Clear
-        </button>
-      </div>
 
       {settings && !settings.hasGroqKey && (
         <div className="flex items-center justify-between gap-3 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
@@ -318,6 +522,7 @@ export function AiChat() {
         </div>
       </div>
     </div>
+  </div>
   );
 }
 
