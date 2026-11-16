@@ -10,7 +10,7 @@ use crate::csv_io::{sanitize_output_filename, write_filtered_export, CsvFilterOp
 use crate::db::{
     delete_local_jobs, job_csv_path, read_job_raw, reset_job_for_resume,
 };
-use crate::engine_proc::{detect_python, start_internal, status_internal};
+use crate::engine_proc::{detect_python, new_hidden_command, start_internal, status_internal};
 use crate::error::AppResult;
 
 #[cfg(target_os = "windows")]
@@ -844,5 +844,96 @@ pub async fn restart_db_job(app: AppHandle, job_id: String) -> AppResult<String>
     }
 
     Ok(new_jid)
+}
+
+fn find_project_root_with_tools(start: &Path) -> PathBuf {
+    let mut cur = start.to_path_buf();
+    for _ in 0..4 {
+        if cur.join("tools.py").is_file() {
+            return cur;
+        }
+        if let Some(parent) = cur.parent() {
+            cur = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    start.to_path_buf()
+}
+
+#[tauri::command]
+pub async fn run_social_lookup(
+    app_handle: AppHandle,
+    platform: String,
+    target: String,
+    location: Option<String>,
+) -> AppResult<String> {
+    let cfg = load_config(&app_handle);
+    let kit_root = resolve_kit_root(&app_handle)?;
+    let project_root = find_project_root_with_tools(&kit_root);
+    let tools_py = project_root.join("tools.py");
+    let py_info = detect_python(cfg.python_override.as_deref())
+        .ok_or_else(|| "Python executable not found".to_string())?;
+
+    let mut cmd = new_hidden_command(&py_info.executable);
+    cmd.current_dir(&project_root);
+    cmd.arg(&tools_py);
+    cmd.arg("run");
+    cmd.arg("social");
+    cmd.arg(&platform);
+    cmd.arg(&target);
+    cmd.arg("--json");
+    if let Some(loc) = location {
+        if !loc.trim().is_empty() {
+            cmd.arg("--location");
+            cmd.arg(loc);
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to execute social scraper: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(format!("Social scraper error: {stderr}\n{stdout}"));
+    }
+
+    Ok(stdout)
+}
+
+#[tauri::command]
+pub async fn run_website_enrich(
+    app_handle: AppHandle,
+    url: String,
+) -> AppResult<String> {
+    let cfg = load_config(&app_handle);
+    let kit_root = resolve_kit_root(&app_handle)?;
+    let project_root = find_project_root_with_tools(&kit_root);
+    let tools_py = project_root.join("tools.py");
+    let py_info = detect_python(cfg.python_override.as_deref())
+        .ok_or_else(|| "Python executable not found".to_string())?;
+
+    let mut cmd = new_hidden_command(&py_info.executable);
+    cmd.current_dir(&project_root);
+    cmd.arg(&tools_py);
+    cmd.arg("run");
+    cmd.arg("enrich");
+    cmd.arg("--url");
+    cmd.arg(&url);
+    cmd.arg("--json");
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to execute website enricher: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(format!("Website enricher error: {stderr}\n{stdout}"));
+    }
+
+    Ok(stdout)
 }
 

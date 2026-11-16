@@ -10,8 +10,11 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
+import warnings
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 try:
     import requests
@@ -97,6 +100,10 @@ class InstagramPublicScraper:
                 res = self._scrape_via_instaloader(username)
                 if res:
                     return res
+            # Try search engine dorking fallback (100% resilient to 429s)
+            ddg_res = self._scrape_via_ddg_dork(username)
+            if ddg_res:
+                return ddg_res
             return InstagramProfile(
                 username=username,
                 url=url,
@@ -105,12 +112,44 @@ class InstagramPublicScraper:
             )
 
         parsed = self._parse_html(username, url, html)
-        # If HTML didn't get follower count, try instaloader
-        if not parsed.followers and HAS_INSTALOADER:
-            loader_res = self._scrape_via_instaloader(username)
-            if loader_res and loader_res.followers:
-                return loader_res
+        # If HTML didn't get follower count, try instaloader or DDG
+        if not parsed.followers:
+            if HAS_INSTALOADER:
+                loader_res = self._scrape_via_instaloader(username)
+                if loader_res and loader_res.followers:
+                    return loader_res
+            ddg_res = self._scrape_via_ddg_dork(username)
+            if ddg_res and ddg_res.followers:
+                parsed.followers = ddg_res.followers
+                if not parsed.bio:
+                    parsed.bio = ddg_res.bio
         return parsed
+
+    def _scrape_via_ddg_dork(self, username: str) -> Optional[InstagramProfile]:
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                results = list(ddgs.text(f"site:instagram.com/{username}/", max_results=2))
+                for r in results:
+                    body = r.get("body", "")
+                    title = r.get("title", "")
+                    stats = re.search(r"([\d.,KMkm]+)\s*Followers,\s*([\d.,KMkm]+)\s*Following,\s*([\d.,KMkm]+)\s*Posts", body + " " + title, re.IGNORECASE)
+                    foll = stats.group(1) if stats else ""
+                    following = stats.group(2) if stats else ""
+                    posts = stats.group(3) if stats else ""
+                    return InstagramProfile(
+                        username=username,
+                        url=f"https://www.instagram.com/{username}/",
+                        full_name=title.split("(@")[0].strip() if "(@" in title else title,
+                        bio=body,
+                        followers=foll,
+                        following=following,
+                        posts_count=posts,
+                        status="ok",
+                    )
+        except Exception:
+            pass
+        return None
 
     def _scrape_via_instaloader(self, username: str) -> Optional[InstagramProfile]:
         if not HAS_INSTALOADER:
@@ -124,7 +163,12 @@ class InstagramPublicScraper:
                 download_comments=False,
                 save_metadata=False,
                 compress_json=False,
+                max_connection_attempts=1,
+                request_timeout=3.0,
             )
+            # Disable Instaloader's long 429 sleep to prevent blocking
+            if hasattr(L.context, "_rate_controller"):
+                L.context._rate_controller.sleep = lambda *a, **kw: (_ for _ in ()).throw(TimeoutError("Rate limited"))
             prof = instaloader.Profile.from_username(L.context, username)
             bio = prof.biography or ""
             emails = EMAIL_REGEX.findall(bio)

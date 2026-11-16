@@ -46,6 +46,8 @@ pub fn run() {
             scraper_api::get_job_status,
             scraper_api::start_scrape_job,
             scraper_api::restart_db_job,
+            scraper_api::run_social_lookup,
+            scraper_api::run_website_enrich,
             groq_agent::chat_with_groq,
             groq_agent::load_chat_history,
             groq_agent::save_chat_history,

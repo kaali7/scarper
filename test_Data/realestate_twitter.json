@@ -1,0 +1,47 @@
+[
+  {
+    "platform": "twitter_x",
+    "handle": "@realtordotcom",
+    "name": "Realtor.com",
+    "url": "https://x.com/realtordotcom",
+    "description": "Your go-to source for real estate news, housing insights, celebrity real estate, and more from https://t.co/myGAfBr557.",
+    "category": "Real Estate / PropTech",
+    "status": "ok"
+  },
+  {
+    "platform": "twitter_x",
+    "handle": "@Zillow",
+    "name": "Zillow",
+    "url": "https://x.com/Zillow",
+    "description": "Home, tweet home. Whether you’re buying, selling, renting or #Zillowing houses, we’ll help you get home.",
+    "category": "Real Estate / PropTech",
+    "status": "ok"
+  },
+  {
+    "platform": "twitter_x",
+    "handle": "@Redfin",
+    "name": "Redfin",
+    "url": "https://x.com/Redfin",
+    "description": "From your first search to your closing day, Redfin’s top-rated app and expert agents are here to help you win. Equal Housing Opportunity.",
+    "category": "Real Estate / PropTech",
+    "status": "ok"
+  },
+  {
+    "platform": "twitter_x",
+    "handle": "@CBRE",
+    "name": "CBRE",
+    "url": "https://x.com/CBRE",
+    "description": "Operating across every dimension of commercial real estate, @CBRE sees more so you can do more.",
+    "category": "Real Estate / PropTech",
+    "status": "ok"
+  },
+  {
+    "platform": "twitter_x",
+    "handle": "@InmanNews",
+    "name": "Inman News",
+    "url": "https://x.com/InmanNews",
+    "description": "The leading real estate news source for agents, brokers, and industry executives.",
+    "category": "Real Estate / PropTech",
+    "status": "ok"
+  }
+]

@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-11-16 15:48:05",
+  "total_sources": 5,
+  "platform_counts": {
+    "instagram": 5,
+    "linkedin": 5,
+    "twitter_x": 5,
+    "reddit": 5,
+    "websites": 5
+  },
+  "output_directory": "C:\\kali\\product\\scraper\\test_Data",
+  "files_generated": [
+    "realestate_instagram.json",
+    "realestate_instagram.csv",
+    "realestate_linkedin.json",
+    "realestate_linkedin.csv",
+    "realestate_twitter.json",
+    "realestate_twitter.csv",
+    "realestate_reddit.json",
+    "realestate_reddit.csv",
+    "realestate_websites_enriched.json",
+    "realestate_websites_enriched.csv",
+    "summary.json"
+  ]
+}

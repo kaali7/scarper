@@ -1,0 +1,57 @@
+[
+  {
+    "platform": "linkedin",
+    "company_name": "CBRE Real Estate",
+    "linkedin_url": "https://www.linkedin.com/company/cbre-real-estate",
+    "headline": "CBRE Real Estate | Commercial Real Estate Services",
+    "employee_count": "10,001+ employees",
+    "location": "Global",
+    "industry": "Real Estate",
+    "snippet": "CBRE Real Estate is a global leader in commercial real estate services and investment.",
+    "status": "not_found"
+  },
+  {
+    "platform": "linkedin",
+    "company_name": "JLL Real Estate",
+    "linkedin_url": "https://za.linkedin.com/company/jll",
+    "headline": "JLL - LinkedIn",
+    "employee_count": "10,001+ employees",
+    "location": "Global",
+    "industry": "Real Estate",
+    "snippet": "JLL Real Estate Chicago, Illinois 2,414,828 followers Powered by data and commercial real estate experts, JLL illuminates a clear path, so you can execute with certainty. About us JLL (Jones Lang LaSalle Incorporated) is a leading global commercial real estate services and investment management company.",
+    "status": "ok"
+  },
+  {
+    "platform": "linkedin",
+    "company_name": "Cushman Wakefield",
+    "linkedin_url": "https://www.linkedin.com/company/cushman-wakefield",
+    "headline": "Cushman Wakefield | Commercial Real Estate Services",
+    "employee_count": "10,001+ employees",
+    "location": "Global",
+    "industry": "Real Estate",
+    "snippet": "Cushman Wakefield is a global leader in commercial real estate services and investment.",
+    "status": "not_found"
+  },
+  {
+    "platform": "linkedin",
+    "company_name": "Colliers Real Estate",
+    "linkedin_url": "https://www.linkedin.com/company/colliers-real-estate",
+    "headline": "Colliers Real Estate | Commercial Real Estate Services",
+    "employee_count": "10,001+ employees",
+    "location": "Global",
+    "industry": "Real Estate",
+    "snippet": "Colliers Real Estate is a global leader in commercial real estate services and investment.",
+    "status": "not_found"
+  },
+  {
+    "platform": "linkedin",
+    "company_name": "Compass Real Estate",
+    "linkedin_url": "https://www.linkedin.com/company/compass-real-estate",
+    "headline": "Compass Real Estate | Commercial Real Estate Services",
+    "employee_count": "10,001+ employees",
+    "location": "United States",
+    "industry": "Real Estate",
+    "snippet": "Compass Real Estate is a global leader in commercial real estate services and investment.",
+    "status": "not_found"
+  }
+]

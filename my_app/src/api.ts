@@ -92,6 +92,15 @@ export const api = {
       waitForCompletion,
     }),
 
+  runSocialLookup: (params: {
+    platform: string;
+    target: string;
+    location?: string;
+  }) => invoke<string>("run_social_lookup", params),
+
+  runWebsiteEnrich: (params: { url: string }) =>
+    invoke<string>("run_website_enrich", params),
+
   chatWithGroq: (messages: { role: "user" | "assistant"; content: string }[]) =>
     invoke<ChatResponse>("chat_with_groq", { messages }),
 

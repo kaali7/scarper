@@ -53,7 +53,7 @@ pub struct EngineStatus {
     pub chrome_path: Option<String>,
 }
 
-fn new_hidden_command(bin: &str) -> Command {
+pub(crate) fn new_hidden_command(bin: &str) -> Command {
     let mut cmd = Command::new(bin);
     cmd.stdin(Stdio::null());
     #[cfg(target_os = "windows")]

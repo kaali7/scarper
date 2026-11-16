@@ -2,14 +2,19 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Copy,
+  ExternalLink,
   FolderOpen,
+  Globe,
   Loader2,
   MapPin,
   Phone,
   Plus,
   Search,
+  Share2,
   Sparkles,
   X,
 } from "lucide-react";
@@ -17,6 +22,7 @@ import { api, formatError } from "../api";
 import { useAppStore } from "../store";
 import type { CityInput, CityMatch, ScrapeRunResult } from "../types";
 
+export type ScrapeTargetSource = "maps" | "social" | "website" | "multichannel";
 type ModePreset = "phone_only" | "standard" | "no_website" | "custom";
 
 const LEAD_FIELDS = [
@@ -77,6 +83,65 @@ export function SearchBuilder() {
 
   const [confirmLarge, setConfirmLarge] = useState(false);
   const [lastResult, setLastResult] = useState<ScrapeRunResult | null>(null);
+
+  // Target source selector
+  const [targetSource, setTargetSource] = useState<ScrapeTargetSource>("maps");
+
+  // Social media inspector state
+  const [socialPlatform, setSocialPlatform] = useState<
+    "instagram" | "linkedin" | "twitter" | "sherlock"
+  >("instagram");
+  const [socialTarget, setSocialTarget] = useState("");
+  const [socialLocation, setSocialLocation] = useState("");
+  const [socialResult, setSocialResult] = useState<any>(null);
+  const [socialError, setSocialError] = useState<string | null>(null);
+
+  // Website lead enricher state
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [websiteResult, setWebsiteResult] = useState<any>(null);
+  const [websiteError, setWebsiteError] = useState<string | null>(null);
+
+  const socialMut = useMutation({
+    mutationFn: () =>
+      api.runSocialLookup({
+        platform: socialPlatform,
+        target: socialTarget.trim(),
+        location: socialLocation.trim() || undefined,
+      }),
+    onSuccess: (raw) => {
+      try {
+        setSocialResult(JSON.parse(raw));
+        setSocialError(null);
+      } catch {
+        setSocialResult(raw);
+        setSocialError(null);
+      }
+    },
+    onError: (err) => {
+      setSocialError(formatError(err));
+      setSocialResult(null);
+    },
+  });
+
+  const websiteMut = useMutation({
+    mutationFn: () =>
+      api.runWebsiteEnrich({
+        url: websiteUrl.trim(),
+      }),
+    onSuccess: (raw) => {
+      try {
+        setWebsiteResult(JSON.parse(raw));
+        setWebsiteError(null);
+      } catch {
+        setWebsiteResult(raw);
+        setWebsiteError(null);
+      }
+    },
+    onError: (err) => {
+      setWebsiteError(formatError(err));
+      setWebsiteResult(null);
+    },
+  });
 
   const { data: businessTypes = [] } = useQuery({
     queryKey: ["business-types"],
@@ -269,62 +334,384 @@ export function SearchBuilder() {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-5">
-      {/* Mode Presets */}
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-100">
-            Quick Scrape Mode
-          </h2>
-          <span className="text-xs text-slate-400">
-            One click sets email, phone filter & output columns
+      {/* Target Data Source Selector */}
+      <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
+        <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-100">
+              <Sparkles className="h-4 w-4 text-emerald-400" />
+              Scrape Target & Data Source
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Decide where you want to scrape data from: Google Maps, Social Media, Direct Websites, or Multi-Channel.
+            </p>
+          </div>
+          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
+            Active: {targetSource.toUpperCase()}
           </span>
         </div>
-        <div className="grid gap-2 sm:grid-cols-4">
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             {
-              id: "phone_only" as const,
-              title: "Name & Phone Only",
-              desc: "Fastest: skips emails & socials, keeps phone leads",
-              icon: Phone,
+              id: "maps" as const,
+              title: "Google Maps",
+              desc: "Local businesses, addresses, ratings & phone leads via CDP",
+              icon: MapPin,
+              badge: "Local",
             },
             {
-              id: "standard" as const,
-              title: "Full Outreach",
-              desc: "8 lead fields + email crawl + socials",
+              id: "social" as const,
+              title: "Social Media",
+              desc: "Instagram, LinkedIn, Twitter/X, Reddit & Sherlock 400+",
+              icon: Share2,
+              badge: "Public & Safe",
+            },
+            {
+              id: "website" as const,
+              title: "Direct Websites",
+              desc: "Extract emails, phones, WhatsApp & socials from any domain",
+              icon: Globe,
+              badge: "Enricher",
+            },
+            {
+              id: "multichannel" as const,
+              title: "All-in-One Multi-Channel",
+              desc: "Maps search + website email crawl + social cross-reference",
               icon: Sparkles,
+              badge: "All Tools",
             },
-            {
-              id: "no_website" as const,
-              title: "No Website Leads",
-              desc: "Only businesses missing a website",
-              icon: Search,
-            },
-            {
-              id: "custom" as const,
-              title: "Custom",
-              desc: "Configure every toggle manually",
-              icon: Plus,
-            },
-          ].map(({ id, title, desc, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => applyPreset(id)}
-              className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition ${
-                preset === id
-                  ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-200"
-                  : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700"
-              }`}
-            >
-              <div className="flex items-center gap-1.5 text-xs font-semibold">
-                <Icon className="h-3.5 w-3.5" />
-                {title}
-              </div>
-              <p className="text-[11px] leading-snug text-slate-400">{desc}</p>
-            </button>
-          ))}
+          ].map(({ id, title, desc, icon: Icon, badge }) => {
+            const isSelected = targetSource === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  setTargetSource(id);
+                  if (id === "multichannel") {
+                    setCollectEmails(true);
+                    setCollectSocials(true);
+                  }
+                }}
+                className={`flex flex-col items-start gap-1.5 rounded-xl border p-3.5 text-left transition ${
+                  isSelected
+                    ? "border-emerald-500 bg-emerald-500/15 shadow-md shadow-emerald-950/40 ring-1 ring-emerald-500/50"
+                    : "border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700 hover:bg-slate-900/50"
+                }`}
+              >
+                <div className="flex w-full items-center justify-between">
+                  <div
+                    className={`flex items-center gap-2 text-xs font-semibold ${
+                      isSelected ? "text-emerald-300" : "text-slate-200"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{title}</span>
+                  </div>
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
+                      isSelected
+                        ? "bg-emerald-500/25 text-emerald-200"
+                        : "bg-slate-800 text-slate-400"
+                    }`}
+                  >
+                    {badge}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-slate-400">{desc}</p>
+              </button>
+            );
+          })}
         </div>
       </section>
+
+      {/* ======================================================== */}
+      {/* 1. SOCIAL MEDIA SCRAPER VIEW                             */}
+      {/* ======================================================== */}
+      {targetSource === "social" && (
+        <section className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-100">
+              Social Media Inspector & Search Dorker
+            </h3>
+            <span className="text-xs text-slate-400">
+              Zero login required · 100% legal public intelligence · Ban-proof
+            </span>
+          </div>
+
+          {/* Platform Pills */}
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: "instagram" as const, label: "📸 Instagram", hint: "Public bio, followers, contact email" },
+              { id: "linkedin" as const, label: "💼 LinkedIn", hint: "Company profile, employee count, HQ dorking" },
+              { id: "twitter" as const, label: "🐦 Twitter / X", hint: "Account bio, handle verification via twscrape" },
+              { id: "sherlock" as const, label: "🔍 Sherlock 400+", hint: "Scan 400+ platforms across the web" },
+            ].map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setSocialPlatform(p.id)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                  socialPlatform === p.id
+                    ? "border-emerald-500 bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40"
+                    : "border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className={socialPlatform === "linkedin" ? "sm:col-span-2" : "sm:col-span-3"}>
+              <label htmlFor="social-target-input" className="mb-1 block text-xs font-medium text-slate-400">
+                {socialPlatform === "instagram" && "Instagram Username or Profile URL"}
+                {socialPlatform === "linkedin" && "Company Name"}
+                {socialPlatform === "twitter" && "Twitter / X Handle (e.g. realtordotcom)"}
+                {socialPlatform === "sherlock" && "Username or Brand Handle to Find across 400+ Sites"}
+              </label>
+              <input
+                id="social-target-input"
+                name="social-target-input"
+                aria-label="Social media target input"
+                value={socialTarget}
+                onChange={(e) => setSocialTarget(e.target.value)}
+                placeholder={
+                  socialPlatform === "instagram"
+                    ? "e.g. starbucks or https://instagram.com/starbucks"
+                    : socialPlatform === "linkedin"
+                    ? "e.g. Blue Tokai Coffee Roasters or CBRE Real Estate"
+                    : socialPlatform === "twitter"
+                    ? "e.g. Zillow or realtordotcom"
+                    : "e.g. bluetokaicoffee"
+                }
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            {socialPlatform === "linkedin" && (
+              <div>
+                <label htmlFor="social-loc-input" className="mb-1 block text-xs font-medium text-slate-400">
+                  Location Filter (optional)
+                </label>
+                <input
+                  id="social-loc-input"
+                  name="social-loc-input"
+                  aria-label="Location filter"
+                  value={socialLocation}
+                  onChange={(e) => setSocialLocation(e.target.value)}
+                  placeholder="e.g. Mumbai, India or New York"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              disabled={socialMut.isPending || !socialTarget.trim()}
+              onClick={() => socialMut.mutate()}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {socialMut.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Scraping Social Data…
+                </>
+              ) : (
+                <>
+                  <Search className="h-4 w-4" />
+                  Run Social Lookup
+                </>
+              )}
+            </button>
+          </div>
+
+          {socialError && (
+            <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-xs text-rose-200">
+              {socialError}
+            </div>
+          )}
+
+          {socialResult && (
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-2">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
+                  Scraped Social Result
+                </span>
+                <span className="text-[11px] text-slate-400">Live JSON response</span>
+              </div>
+              <pre className="max-h-64 overflow-auto rounded bg-slate-900 p-3 font-mono text-xs text-slate-200">
+                {typeof socialResult === "string" ? socialResult : JSON.stringify(socialResult, null, 2)}
+              </pre>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ======================================================== */}
+      {/* 2. DIRECT WEBSITE ENRICHER VIEW                          */}
+      {/* ======================================================== */}
+      {targetSource === "website" && (
+        <section className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-100">
+              Website & Contact Lead Enricher
+            </h3>
+            <span className="text-xs text-slate-400">
+              Powered by Crawl4AI + Fast Contact Extractor
+            </span>
+          </div>
+
+          <div>
+            <label htmlFor="website-url-input" className="mb-1 block text-xs font-medium text-slate-400">
+              Website Domain or URL
+            </label>
+            <input
+              id="website-url-input"
+              name="website-url-input"
+              aria-label="Website URL to enrich"
+              value={websiteUrl}
+              onChange={(e) => setWebsiteUrl(e.target.value)}
+              placeholder="e.g. https://www.cbre.com or https://bluetokaicoffee.com"
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-4 pt-1">
+            <div className="flex items-center gap-2 text-xs text-slate-300">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              <span>Contact Emails</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-300">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              <span>Phone Numbers</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-300">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              <span>WhatsApp Chat Links</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-300">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              <span>Social Profiles</span>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              disabled={websiteMut.isPending || !websiteUrl.trim()}
+              onClick={() => websiteMut.mutate()}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {websiteMut.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Enriching Leads…
+                </>
+              ) : (
+                <>
+                  <Globe className="h-4 w-4" />
+                  Enrich Website Leads
+                </>
+              )}
+            </button>
+          </div>
+
+          {websiteError && (
+            <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-xs text-rose-200">
+              {websiteError}
+            </div>
+          )}
+
+          {websiteResult && (
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-2">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
+                  Enriched Contact Details
+                </span>
+                <span className="text-[11px] text-slate-400">Live JSON response</span>
+              </div>
+              <pre className="max-h-64 overflow-auto rounded bg-slate-900 p-3 font-mono text-xs text-slate-200">
+                {typeof websiteResult === "string" ? websiteResult : JSON.stringify(websiteResult, null, 2)}
+              </pre>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ======================================================== */}
+      {/* 3. GOOGLE MAPS & MULTI-CHANNEL VIEW                      */}
+      {/* ======================================================== */}
+      {(targetSource === "maps" || targetSource === "multichannel") && (
+        <>
+          {targetSource === "multichannel" && (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-200">
+              <Sparkles className="h-4 w-4 text-emerald-400 shrink-0" />
+              <span>
+                <strong>Multi-Channel Mode Active:</strong> Scrapes Google Maps local businesses, then automatically crawls their websites for verified contact emails, WhatsApp numbers, and discovers their social profiles!
+              </span>
+            </div>
+          )}
+
+          {/* Mode Presets */}
+          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-100">
+                Quick Scrape Mode
+              </h2>
+              <span className="text-xs text-slate-400">
+                One click sets email, phone filter & output columns
+              </span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-4">
+              {[
+                {
+                  id: "phone_only" as const,
+                  title: "Name & Phone Only",
+                  desc: "Fastest: skips emails & socials, keeps phone leads",
+                  icon: Phone,
+                },
+                {
+                  id: "standard" as const,
+                  title: "Full Outreach",
+                  desc: "8 lead fields + email crawl + socials",
+                  icon: Sparkles,
+                },
+                {
+                  id: "no_website" as const,
+                  title: "No Website Leads",
+                  desc: "Only businesses missing a website",
+                  icon: Search,
+                },
+                {
+                  id: "custom" as const,
+                  title: "Custom",
+                  desc: "Configure every toggle manually",
+                  icon: Plus,
+                },
+              ].map(({ id, title, desc, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => applyPreset(id)}
+                  className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition ${
+                    preset === id
+                      ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-200"
+                      : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-semibold">
+                    <Icon className="h-3.5 w-3.5" />
+                    {title}
+                  </div>
+                  <p className="text-[11px] leading-snug text-slate-400">{desc}</p>
+                </button>
+              ))}
+            </div>
+          </section>
 
       {/* What & Where */}
       <section className="grid gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5 md:grid-cols-2">
@@ -799,6 +1186,8 @@ export function SearchBuilder() {
           </button>
         </div>
       </section>
+      </>
+      )}
 
       {/* Live Progress */}
       {(scrapeMut.isPending || jobSubmitted || progressList.length > 0) && (

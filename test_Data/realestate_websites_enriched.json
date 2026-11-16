@@ -1,0 +1,79 @@
+[
+  {
+    "website": "https://www.cbre.com",
+    "emails": [],
+    "phones": [],
+    "whatsapp": [],
+    "instagram": "",
+    "linkedin": "https://www.linkedin.com/company/cbre",
+    "facebook": "https://www.facebook.com/cbre",
+    "twitter": "https://twitter.com/cbre",
+    "pages_visited": [
+      "https://www.cbre.com"
+    ],
+    "status": "ok"
+  },
+  {
+    "website": "https://www.jll.com",
+    "emails": [],
+    "phones": [],
+    "whatsapp": [],
+    "instagram": "https://www.instagram.com/jll/",
+    "linkedin": "https://www.linkedin.com/company/jll/",
+    "facebook": "https://www.facebook.com/jll/",
+    "twitter": "https://twitter.com/JLL",
+    "pages_visited": [
+      "https://www.jll.com",
+      "https://www.jll.com/en-in/contact"
+    ],
+    "status": "ok"
+  },
+  {
+    "website": "https://www.compass.com",
+    "emails": [
+      "1099@compass.com",
+      "agentinvoicing@compass.com",
+      "cardonfile@compass.com",
+      "no-reply@compass.com",
+      "reply-to-agent@compass.com",
+      "support@compass.com"
+    ],
+    "phones": [],
+    "whatsapp": [],
+    "instagram": "//instagram.com/compass/",
+    "linkedin": "",
+    "facebook": "//facebook.com/compass/",
+    "twitter": "//x.com/compass/",
+    "pages_visited": [
+      "https://www.compass.com",
+      "https://www.compass.com/about/"
+    ],
+    "status": "ok"
+  },
+  {
+    "website": "https://www.century21.com",
+    "emails": [],
+    "phones": [],
+    "whatsapp": [],
+    "instagram": "",
+    "linkedin": "",
+    "facebook": "",
+    "twitter": "",
+    "pages_visited": [
+      "https://www.century21.com"
+    ],
+    "status": "ok"
+  },
+  {
+    "website": "https://www.colliers.com",
+    "emails": [],
+    "phones": [],
+    "whatsapp": [],
+    "instagram": "",
+    "linkedin": "",
+    "facebook": "",
+    "twitter": "",
+    "pages_visited": [],
+    "status": "failed"
+  }
+]
