@@ -62,9 +62,20 @@ pub struct SettingsSummary {
     pub groq_key_masked: String,
 }
 
+pub fn normalize_kit_root_path(path: &Path) -> PathBuf {
+    if path.join("engine").join("serve.py").is_file() {
+        path.to_path_buf()
+    } else if path.join("map_scraper").join("engine").join("serve.py").is_file() {
+        path.join("map_scraper")
+    } else {
+        path.to_path_buf()
+    }
+}
+
 pub fn is_valid_kit_root(path: &Path) -> bool {
-    path.join("engine").join("serve.py").is_file()
-        && path.join("scripts").join("engine.py").is_file()
+    let normalized = normalize_kit_root_path(path);
+    normalized.join("engine").join("serve.py").is_file()
+        && normalized.join("scripts").join("engine.py").is_file()
 }
 
 pub fn detect_kit_root() -> Option<PathBuf> {
@@ -81,14 +92,18 @@ pub fn detect_kit_root() -> Option<PathBuf> {
         let mut cur = Some(seed.as_path());
         while let Some(dir) = cur {
             if is_valid_kit_root(dir) {
-                return Some(dir.to_path_buf());
+                return Some(normalize_kit_root_path(dir));
             }
             cur = dir.parent();
         }
     }
+    let map_fallback = PathBuf::from(r"c:\kali\product\scraper\map_scraper");
+    if is_valid_kit_root(&map_fallback) {
+        return Some(map_fallback);
+    }
     let fallback = PathBuf::from(r"c:\kali\product\scraper");
     if is_valid_kit_root(&fallback) {
-        return Some(fallback);
+        return Some(normalize_kit_root_path(&fallback));
     }
     None
 }
@@ -136,11 +151,14 @@ pub fn save_config_to_disk(app: &AppHandle, cfg: &DesktopConfig) -> AppResult<()
 pub fn resolve_kit_root(app: &AppHandle) -> AppResult<PathBuf> {
     let cfg = load_config(app);
     let p = PathBuf::from(&cfg.kit_root);
-    if is_valid_kit_root(&p) {
-        Ok(p)
+    let norm = normalize_kit_root_path(&p);
+    if norm.join("engine").join("serve.py").is_file() {
+        Ok(norm)
+    } else if let Some(detected) = detect_kit_root() {
+        Ok(detected)
     } else {
         Err(format!(
-            "Kit root '{}' does not contain engine/serve.py and scripts/engine.py. Set the kit folder in Settings.",
+            "Kit root '{}' does not contain map_scraper/engine/serve.py or engine/serve.py. Set the kit folder in Settings.",
             cfg.kit_root
         ))
     }
@@ -177,7 +195,12 @@ pub fn parse_env_text(content: &str) -> HashMap<String, String> {
 }
 
 pub fn read_kit_env(kit_root: &Path) -> KitEnv {
-    let env_path = kit_root.join(".env");
+    let norm = normalize_kit_root_path(kit_root);
+    let env_path = if norm.join(".env").is_file() {
+        norm.join(".env")
+    } else {
+        kit_root.join(".env")
+    };
     let map = fs::read_to_string(env_path)
         .map(|s| parse_env_text(&s))
         .unwrap_or_default();
@@ -222,10 +245,21 @@ pub fn read_kit_env(kit_root: &Path) -> KitEnv {
 }
 
 pub fn write_kit_env(kit_root: &Path, env: &KitEnv) -> AppResult<()> {
-    let env_path = kit_root.join(".env");
+    let norm = normalize_kit_root_path(kit_root);
+    let env_path = if norm.join(".env").is_file() || norm.join(".env.example").is_file() {
+        norm.join(".env")
+    } else {
+        kit_root.join(".env")
+    };
     let mut lines: Vec<String> = if env_path.is_file() {
         fs::read_to_string(&env_path)
             .map_err(|e| format!("Failed to read .env: {e}"))?
+            .lines()
+            .map(|s| s.to_string())
+            .collect()
+    } else if norm.join(".env.example").is_file() {
+        fs::read_to_string(norm.join(".env.example"))
+            .map_err(|e| format!("Failed to read .env.example: {e}"))?
             .lines()
             .map(|s| s.to_string())
             .collect()
@@ -408,7 +442,7 @@ pub fn save_desktop_settings(
     let trimmed_root = kit_root.trim().to_string();
     if !is_valid_kit_root(Path::new(&trimmed_root)) {
         return Err(format!(
-            "Folder '{trimmed_root}' does not contain engine/serve.py and scripts/engine.py."
+            "Folder '{trimmed_root}' does not contain map_scraper/engine/serve.py or engine/serve.py."
         ));
     }
     let clean_py = python_override

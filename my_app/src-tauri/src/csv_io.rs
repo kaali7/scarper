@@ -112,6 +112,11 @@ pub fn scan_csv_files(kit_root: &Path) -> AppResult<Vec<CsvFileEntry>> {
         .collect();
 
     let mut scan_dirs = vec![kit_root.to_path_buf()];
+    if let Some(parent) = kit_root.parent() {
+        if parent.is_dir() && parent != kit_root {
+            scan_dirs.push(parent.to_path_buf());
+        }
+    }
     for sub in ["out", "output", "data", "gmaps-output"] {
         let sub_dir = kit_root.join(sub);
         if sub_dir.is_dir() {
@@ -669,7 +674,10 @@ mod tests {
 
     #[test]
     fn loads_coffee_shops_csv_without_error() {
-        let path = PathBuf::from(r"../../.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
+        let mut path = PathBuf::from(r"../../map_scraper/.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
+        if !path.is_file() {
+            path = PathBuf::from(r"../../.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
+        }
         if path.is_file() {
             let res = load_csv_table(&path, &CsvFilterOptions::default()).unwrap();
             assert_eq!(res.rows.len(), 73);

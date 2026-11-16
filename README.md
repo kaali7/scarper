@@ -1,8 +1,48 @@
-# Google Maps Scraper Kit
+# Multi-Tool Scraper Suite & Google Maps Scraper Kit
 
 <p align="center">
-  <img src="assets/banner.svg" alt="Google Maps Scraper Kit: free local Google Maps scraper for lead generation, driven by Claude Code" width="100%">
+  <img src="map_scraper/assets/banner.svg" alt="Google Maps Scraper Kit: free local Google Maps scraper for lead generation, driven by Claude Code" width="100%">
 </p>
+
+## Project Architecture & Structure
+
+This repository is organized into modular scrapers and a desktop control application:
+
+```
+scraper/
+├── tools.py            # Unified Tools Dispatcher & CLI runner
+├── map_scraper/        # Google Maps Scraper (CDP Engine, CLI scripts, presets)
+│   ├── engine/         # Python CDP scraper engine & server (serve.py)
+│   ├── scripts/        # CLI scripts (scrape.py, engine.py)
+│   ├── .engine/data/   # SQLite jobs database (jobs.db) & raw scraped CSVs
+│   ├── docs/           # Recipes, comparisons, and guides
+│   └── requirements-browser.txt
+├── social_scraper/     # (Extensible) Social media scraper for Instagram, LinkedIn, X
+├── my_app/             # Desktop GUI Application (Tauri v2 + React 19 + TypeScript)
+└── my_docs/            # Product requirements (PRD) and architecture docs
+```
+
+### Unified Tools Dispatcher (`tools.py`)
+Run, inspect, and manage any scraper through `tools.py`:
+```bash
+# List all registered scrapers and their capabilities
+python tools.py list
+
+# Run Google Maps scraper
+python tools.py run map "coffee shops in Miami" --depth 2
+
+# Manage background engine server
+python tools.py start map --port 8080
+python tools.py status map
+python tools.py stop map
+
+# Export AI tool JSON schema
+python tools.py schema map
+```
+
+---
+
+## Google Maps Scraper Kit
 
 <p align="center">
   <a href="https://github.com/Mahanaicoach/google-maps-scraper-kit/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Mahanaicoach/google-maps-scraper-kit?style=flat-square&color=f59e0b"></a>
