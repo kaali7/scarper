@@ -356,8 +356,11 @@ export function DbCsvExplorer() {
     if (!selectedCsvPath) return;
     setActionErr(null);
     try {
+      const defaultName = selectedJob?.name
+        ? `${selectedJob.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-")}.csv`
+        : "filtered-leads.csv";
       const dest = await save({
-        defaultPath: "filtered-leads.csv",
+        defaultPath: defaultName,
         filters: [
           { name: "CSV", extensions: ["csv"] },
           { name: "JSON", extensions: ["json"] },
