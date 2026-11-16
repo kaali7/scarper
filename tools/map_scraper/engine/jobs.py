@@ -137,7 +137,9 @@ def validate(body):
             "verify_emails": _bool(body, "verify_emails"), "socials": _bool(body, "socials"),
             "browser_sites": _bool(body, "browser_sites"),
             "reviews_max": _int(body, "reviews_max", 0, 0, REVIEWS_MAX, "reviews_max"),
-            "proxies": _proxies(body.get("proxies"))}
+            "proxies": _proxies(body.get("proxies")),
+            "exclude_job_ids": [str(x).strip() for x in body.get("exclude_job_ids", []) if str(x).strip()],
+            "exclude_keys": [str(x).strip() for x in body.get("exclude_keys", []) if str(x).strip()]}
     if data["browser_sites"]:
         from website_browser import check_available
         try:
@@ -606,6 +608,17 @@ class Worker(threading.Thread):
             self.store.cut(jid, p.get("bytes", 0))  # the rows of a keyword cut short are searched again
         rows = self.store.read_rows(jid)  # [] when the cut removed the file
         seen = {place_key(r) for r in rows}
+        for old_jid in d.get("exclude_job_ids", []):
+            try:
+                for r in self.store.read_rows(old_jid):
+                    k = place_key(r)
+                    if k:
+                        seen.add(k)
+            except Exception:
+                pass
+        for k in d.get("exclude_keys", []):
+            if k:
+                seen.add(k)
         # What an earlier run of this job saw, for its final note (a job resumed after its search).
         errors = [p["last_error"]] * p.get("failed", 0) if p.get("last_error") else []
         notes, blocked, retries, rot, refused = [], p.get("blocked", False), p.get("retried", 0), 0, set()
@@ -620,7 +633,8 @@ class Worker(threading.Thread):
         if done or p.get("resumes"):
             self.log(f"job {jid} resumed at keyword {done + 1}/{len(kws)} with {len(rows)} places, {budget:.0f} s left")
         else:
-            self.log(f"job {jid} started: {len(kws)} keyword(s), depth {d['depth']}, max_time {d['max_time']} s")
+            dedup_note = f", deduplicating against {len(seen)} existing places" if seen else ""
+            self.log(f"job {jid} started: {len(kws)} keyword(s), depth {d['depth']}, max_time {d['max_time']} s{dedup_note}")
 
         def save(**kw):
             p.update(kw, elapsed=round(used + time.monotonic() - started, 1), places=len(rows))

@@ -5,8 +5,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Copy,
-  ExternalLink,
   FolderOpen,
   Globe,
   Loader2,

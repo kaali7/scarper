@@ -846,6 +846,97 @@ pub async fn restart_db_job(app: AppHandle, job_id: String) -> AppResult<String>
     Ok(new_jid)
 }
 
+#[tauri::command]
+pub async fn rerun_job_for_new_data(
+    app: AppHandle,
+    job_id: String,
+    extra_depth: Option<u32>,
+) -> AppResult<String> {
+    if !crate::db::is_valid_uuid(&job_id) {
+        return Err("Invalid job ID format.".to_string());
+    }
+
+    let kit_root = resolve_kit_root(&app)?;
+    let (name, _status, data, _progress) = read_job_raw(&kit_root, &job_id)?;
+
+    // Extract links and titles from previous CSV to guarantee deduplication
+    let mut exclude_keys: Vec<String> = Vec::new();
+    let old_csv = job_csv_path(&kit_root, &job_id);
+    if old_csv.is_file() {
+        if let Ok(table) = crate::csv_io::load_csv_table(
+            &old_csv,
+            &crate::csv_io::CsvFilterOptions {
+                columns: Some(vec![
+                    "link".to_string(),
+                    "title".to_string(),
+                    "place_id".to_string(),
+                    "data_id".to_string(),
+                ]),
+                max_rows: Some(20_000),
+                ..Default::default()
+            },
+        ) {
+            for row in table.rows {
+                for cell in row {
+                    let trimmed = cell.trim();
+                    if !trimmed.is_empty() && trimmed.len() > 2 {
+                        exclude_keys.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Increase depth so engine scrolls deeper into fresh leads
+    let prev_depth = data["depth"].as_u64().unwrap_or(5) as u32;
+    let add_depth = extra_depth.unwrap_or(10);
+    let new_depth = (prev_depth + add_depth).min(200);
+
+    let clean_name = name
+        .trim_end_matches(" (Fresh Leads)")
+        .trim_end_matches(" (New Data)");
+    let new_name = format!("{} (Fresh Leads)", clean_name);
+
+    let mut body = data.clone();
+    body["name"] = serde_json::Value::String(new_name);
+    body["depth"] = serde_json::json!(new_depth);
+    body["exclude_job_ids"] = serde_json::json!([job_id]);
+    body["exclude_keys"] = serde_json::json!(exclude_keys);
+
+    let status = status_internal(&app).await?;
+    if !status.running {
+        start_internal(&app).await?;
+    }
+
+    let env = read_kit_env(&kit_root);
+    let client = engine_client()?;
+    let mut post = client
+        .post(format!("http://127.0.0.1:{}/api/v1/jobs", env.port))
+        .json(&body);
+    if !env.api_key.is_empty() {
+        post = post.header("X-API-Key", &env.api_key);
+    }
+    let resp = post
+        .send()
+        .await
+        .map_err(|e| format!("Failed to submit fresh scrape to engine: {e}"))?;
+    if !resp.status().is_success() {
+        let code = resp.status();
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!("Engine rejected job (HTTP {code}): {err_text}"));
+    }
+    let created: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid create response: {e}"))?;
+    let new_jid = created["id"]
+        .as_str()
+        .ok_or_else(|| "Engine response missing job id.".to_string())?
+        .to_string();
+
+    Ok(new_jid)
+}
+
 fn find_project_root_with_tools(start: &Path) -> PathBuf {
     let mut cur = start.to_path_buf();
     for _ in 0..4 {

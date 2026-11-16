@@ -62,10 +62,19 @@ export const api = {
 
   restartDbJob: (jobId: string) => invoke<string>("restart_db_job", { jobId }),
 
+  rerunJobForNewData: (jobId: string, extraDepth?: number) =>
+    invoke<string>("rerun_job_for_new_data", { jobId, extraDepth }),
+
   clearDbJobs: (failedOnly = false) =>
     invoke<number>("clear_db_jobs", { failedOnly }),
 
   listCsvFiles: () => invoke<CsvFileEntry[]>("list_csv_files"),
+
+  saveJobToWorkspace: (jobId: string, customName?: string) =>
+    invoke<string>("save_job_to_workspace", { jobId, customName }),
+
+  saveCsvToWorkspace: (sourcePath: string, customName?: string) =>
+    invoke<string>("save_csv_to_workspace", { sourcePath, customName }),
 
   readCsvTable: (path: string, options?: CsvFilterOptions) =>
     invoke<CsvTableData>("read_csv_table", { path, options }),

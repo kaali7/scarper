@@ -103,6 +103,63 @@ fn count_csv_data_rows(path: &Path) -> usize {
     reader.records().count()
 }
 
+pub fn resolve_save_dir(kit_root: &Path) -> PathBuf {
+    if let Some(parent) = kit_root.parent() {
+        if parent.file_name().and_then(|s| s.to_str()) == Some("tools") {
+            if let Some(gp) = parent.parent() {
+                if gp.is_dir() {
+                    return gp.to_path_buf();
+                }
+            }
+        }
+    }
+    kit_root.to_path_buf()
+}
+
+pub fn pick_available_filename(dir: &Path, base_name: &str, ext: &str) -> String {
+    let candidate = format!("{base_name}.{ext}");
+    if !dir.join(&candidate).exists() {
+        return candidate;
+    }
+    for i in 1..1000 {
+        let candidate = format!("{base_name}-{i}.{ext}");
+        if !dir.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    format!(
+        "{base_name}-{}.{ext}",
+        std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    )
+}
+
+pub fn generate_slug_from_job(kit_root: &Path, job_id: &str) -> String {
+    if let Ok((name, _, _, _)) = crate::db::read_job_raw(kit_root, job_id) {
+        let slug: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let trimmed: String = slug
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("-");
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+    }
+    format!("job-{}", &job_id.chars().take(8).collect::<String>())
+}
+
 pub fn scan_csv_files(kit_root: &Path) -> AppResult<Vec<CsvFileEntry>> {
     let mut entries = Vec::new();
     let jobs_map: HashMap<String, (String, String)> = read_jobs_from_db(kit_root)
@@ -111,19 +168,28 @@ pub fn scan_csv_files(kit_root: &Path) -> AppResult<Vec<CsvFileEntry>> {
         .map(|j| (j.id, (j.name, j.status)))
         .collect();
 
+    let save_dir = resolve_save_dir(kit_root);
     let mut scan_dirs = vec![kit_root.to_path_buf()];
+    if save_dir != kit_root && !scan_dirs.contains(&save_dir) {
+        scan_dirs.push(save_dir.clone());
+    }
     if let Some(parent) = kit_root.parent() {
-        if parent.is_dir() && parent != kit_root {
+        if parent.is_dir() && parent != kit_root && !scan_dirs.contains(&parent.to_path_buf()) {
             scan_dirs.push(parent.to_path_buf());
         }
     }
-    for sub in ["out", "output", "data", "gmaps-output"] {
+    for sub in ["out", "output", "data", "gmaps-output", "test_Data"] {
         let sub_dir = kit_root.join(sub);
-        if sub_dir.is_dir() {
+        if sub_dir.is_dir() && !scan_dirs.contains(&sub_dir) {
             scan_dirs.push(sub_dir);
+        }
+        let save_sub = save_dir.join(sub);
+        if save_sub.is_dir() && !scan_dirs.contains(&save_sub) {
+            scan_dirs.push(save_sub);
         }
     }
 
+    let mut seen_canonical = HashSet::new();
     for dir in scan_dirs {
         if let Ok(rd) = fs::read_dir(&dir) {
             for item in rd.flatten() {
@@ -134,6 +200,11 @@ pub fn scan_csv_files(kit_root: &Path) -> AppResult<Vec<CsvFileEntry>> {
                         .map(|e| e.eq_ignore_ascii_case("csv"))
                         .unwrap_or(false)
                 {
+                    if let Ok(canon) = p.canonicalize() {
+                        if !seen_canonical.insert(canon) {
+                            continue;
+                        }
+                    }
                     if let Ok(meta) = item.metadata() {
                         let modified_ms = meta
                             .modified()
@@ -143,6 +214,7 @@ pub fn scan_csv_files(kit_root: &Path) -> AppResult<Vec<CsvFileEntry>> {
                             .unwrap_or(0);
                         let rel_name = p
                             .strip_prefix(kit_root)
+                            .or_else(|_| p.strip_prefix(&save_dir))
                             .map(|r| r.to_string_lossy().to_string())
                             .unwrap_or_else(|_| item.file_name().to_string_lossy().to_string());
                         entries.push(CsvFileEntry {
@@ -547,6 +619,96 @@ pub fn export_csv_file(
 }
 
 #[tauri::command]
+pub fn save_job_to_workspace(
+    app: AppHandle,
+    job_id: String,
+    custom_name: Option<String>,
+) -> AppResult<String> {
+    if !crate::db::is_valid_uuid(&job_id) {
+        return Err("Invalid job ID format.".to_string());
+    }
+    let kit_root = resolve_kit_root(&app)?;
+    let save_dir = resolve_save_dir(&kit_root);
+
+    let src_csv = crate::db::job_csv_path(&kit_root, &job_id);
+    if !src_csv.is_file() {
+        return Err(format!(
+            "Job {job_id} has no CSV file on disk yet. Run or restart the job first."
+        ));
+    }
+
+    let clean_base = if let Some(ref c) = custom_name {
+        let trimmed = c.trim();
+        if !trimmed.is_empty() {
+            let mut name = sanitize_output_filename(trimmed, "csv")?;
+            if name.to_ascii_lowercase().ends_with(".csv") {
+                name.truncate(name.len() - 4);
+            }
+            name
+        } else {
+            generate_slug_from_job(&kit_root, &job_id)
+        }
+    } else {
+        generate_slug_from_job(&kit_root, &job_id)
+    };
+
+    let filename = pick_available_filename(&save_dir, &clean_base, "csv");
+    let dest_path = save_dir.join(&filename);
+
+    fs::copy(&src_csv, &dest_path)
+        .map_err(|e| format!("Failed to copy CSV to {}: {e}", dest_path.display()))?;
+
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn save_csv_to_workspace(
+    app: AppHandle,
+    source_path: String,
+    custom_name: Option<String>,
+) -> AppResult<String> {
+    let kit_root = resolve_kit_root(&app)?;
+    let save_dir = resolve_save_dir(&kit_root);
+    let src = PathBuf::from(&source_path);
+    if !src.is_file() {
+        return Err(format!("Source CSV does not exist: {source_path}"));
+    }
+
+    if src.parent() == Some(&save_dir) {
+        return Ok(src.to_string_lossy().to_string());
+    }
+
+    let base_name = if let Some(ref c) = custom_name {
+        let trimmed = c.trim();
+        if !trimmed.is_empty() {
+            let mut name = sanitize_output_filename(trimmed, "csv")?;
+            if name.to_ascii_lowercase().ends_with(".csv") {
+                name.truncate(name.len() - 4);
+            }
+            name
+        } else {
+            src.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("saved-leads")
+                .to_string()
+        }
+    } else {
+        src.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("saved-leads")
+            .to_string()
+    };
+
+    let filename = pick_available_filename(&save_dir, &base_name, "csv");
+    let dest_path = save_dir.join(&filename);
+
+    fs::copy(&src, &dest_path)
+        .map_err(|e| format!("Failed to copy CSV to {}: {e}", dest_path.display()))?;
+
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub fn open_file_externally(app: AppHandle, path: String) -> AppResult<()> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
@@ -686,6 +848,29 @@ mod tests {
             assert_eq!(res.rows.len(), 73);
             assert_eq!(res.headers.len(), 37);
         }
+    }
+
+    #[test]
+    fn picks_unique_available_filename_avoiding_collisions() {
+        let uniq = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("gmaps_save_test_{uniq}"));
+        fs::create_dir_all(&dir).unwrap();
+
+        let f1 = pick_available_filename(&dir, "real-estate", "csv");
+        assert_eq!(f1, "real-estate.csv");
+        fs::write(dir.join(&f1), "header\n").unwrap();
+
+        let f2 = pick_available_filename(&dir, "real-estate", "csv");
+        assert_eq!(f2, "real-estate-1.csv");
+        fs::write(dir.join(&f2), "header\n").unwrap();
+
+        let f3 = pick_available_filename(&dir, "real-estate", "csv");
+        assert_eq!(f3, "real-estate-2.csv");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 

@@ -20,11 +20,13 @@ import {
   Download,
   ExternalLink,
   FileSpreadsheet,
+  FolderDown,
   FolderOpen,
   Loader2,
   RefreshCw,
   RotateCcw,
   Search,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { api, formatError } from "../api";
@@ -283,6 +285,52 @@ export function DbCsvExplorer() {
       setSelectedJobId(newJobId);
       setRestartMsg(
         `Restarted "${job.name}" (${newJobId.slice(0, 8)}…). Engine is running and scraping will continue.`,
+      );
+      qc.invalidateQueries({ queryKey: ["engine-status"] });
+      qc.invalidateQueries({ queryKey: ["db-jobs"] });
+      qc.invalidateQueries({ queryKey: ["csv-files"] });
+      qc.invalidateQueries({ queryKey: ["csv-table"] });
+    },
+    onError: (err) => setActionErr(formatError(err)),
+  });
+
+  const saveJobMut = useMutation({
+    mutationFn: ({ jobId, customName }: { jobId: string; customName?: string }) =>
+      api.saveJobToWorkspace(jobId, customName),
+    onSuccess: (savedPath) => {
+      setActionErr(null);
+      const fileName = savedPath.split(/[\\/]/).pop() || "leads.csv";
+      setExportMsg(
+        `Saved "${fileName}" directly into project folder! You can now see and open it in "SAVED CSV FILES" below.`,
+      );
+      qc.invalidateQueries({ queryKey: ["csv-files"] });
+      openCsvInViewer(savedPath, null);
+    },
+    onError: (err) => setActionErr(formatError(err)),
+  });
+
+  const saveCsvMut = useMutation({
+    mutationFn: ({ sourcePath, customName }: { sourcePath: string; customName?: string }) =>
+      api.saveCsvToWorkspace(sourcePath, customName),
+    onSuccess: (savedPath) => {
+      setActionErr(null);
+      const fileName = savedPath.split(/[\\/]/).pop() || "leads.csv";
+      setExportMsg(`Saved "${fileName}" to project folder! Listed under Saved CSV Files below.`);
+      qc.invalidateQueries({ queryKey: ["csv-files"] });
+    },
+    onError: (err) => setActionErr(formatError(err)),
+  });
+
+  const rerunFreshMut = useMutation({
+    mutationFn: ({ jobId, extraDepth }: { jobId: string; extraDepth?: number }) =>
+      api.rerunJobForNewData(jobId, extraDepth),
+    onSuccess: (newJobId, vars) => {
+      setActionErr(null);
+      const original = dbJobs.find((j) => j.id === vars.jobId);
+      const name = original ? original.name : "Job";
+      setSelectedJobId(newJobId);
+      setRestartMsg(
+        `Started fresh scrape for "${name}" (depth +10). Previously scraped places are excluded so only NEW leads will be collected!`,
       );
       qc.invalidateQueries({ queryKey: ["engine-status"] });
       qc.invalidateQueries({ queryKey: ["db-jobs"] });
@@ -656,6 +704,43 @@ export function DbCsvExplorer() {
                           </button>
                         </div>
                       </div>
+
+                      {/* 1-Click Action Buttons: Save to Files (Workspace) & Gather New Data */}
+                      <div
+                        className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-800/80 pt-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {job.csvExists && (
+                          <button
+                            type="button"
+                            onClick={() => saveJobMut.mutate({ jobId: job.id })}
+                            disabled={saveJobMut.isPending && saveJobMut.variables?.jobId === job.id}
+                            className="inline-flex items-center gap-1 rounded bg-slate-800/90 px-2 py-0.5 text-[10px] font-medium text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition disabled:opacity-50"
+                            title="Save this job's CSV directly into the workspace folder (shows under Saved CSV Files below)"
+                          >
+                            {saveJobMut.isPending && saveJobMut.variables?.jobId === job.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin text-emerald-400" />
+                            ) : (
+                              <FolderDown className="h-3 w-3 text-emerald-400" />
+                            )}
+                            Save to Files
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => rerunFreshMut.mutate({ jobId: job.id })}
+                          disabled={rerunFreshMut.isPending && rerunFreshMut.variables?.jobId === job.id}
+                          className="inline-flex items-center gap-1 rounded bg-slate-800/90 px-2 py-0.5 text-[10px] font-medium text-sky-300 border border-sky-500/30 hover:bg-sky-500/20 hover:border-sky-500/50 transition disabled:opacity-50"
+                          title="Rerun search deeper to gather NEW leads (automatically excludes previously scraped places)"
+                        >
+                          {rerunFreshMut.isPending && rerunFreshMut.variables?.jobId === job.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-sky-400" />
+                          ) : (
+                            <Sparkles className="h-3 w-3 text-sky-400" />
+                          )}
+                          Gather New Data
+                        </button>
+                      </div>
                       {confirmingThis && (
                         <div className="mt-2 flex items-center justify-between gap-2 rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[10px] text-rose-200">
                           <span>Remove this job & raw CSV?</span>
@@ -775,6 +860,19 @@ export function DbCsvExplorer() {
             <button
               type="button"
               onClick={() => setRestartMsg(null)}
+              className="text-emerald-300 hover:text-white"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {exportMsg && !selectedCsvPath && (
+          <div className="m-3 mb-0 flex items-center justify-between gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+            <span>{exportMsg}</span>
+            <button
+              type="button"
+              onClick={() => setExportMsg(null)}
               className="text-emerald-300 hover:text-white"
             >
               Dismiss
@@ -1016,6 +1114,36 @@ export function DbCsvExplorer() {
                       Live Progress ({percentDone}%)
                     </button>
                   )}
+                  {selectedJob && (
+                    <button
+                      type="button"
+                      onClick={() => rerunFreshMut.mutate({ jobId: selectedJob.id })}
+                      disabled={rerunFreshMut.isPending && rerunFreshMut.variables?.jobId === selectedJob.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-50"
+                      title="Rerun search deeper to gather NEW leads (excludes already scraped places)"
+                    >
+                      {rerunFreshMut.isPending && rerunFreshMut.variables?.jobId === selectedJob.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 text-sky-400" />
+                      )}
+                      Gather New Leads
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => saveCsvMut.mutate({ sourcePath: selectedCsvPath })}
+                    disabled={saveCsvMut.isPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                    title="Save this CSV directly into the workspace folder (Saved CSV Files)"
+                  >
+                    {saveCsvMut.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                    ) : (
+                      <FolderDown className="h-3.5 w-3.5 text-emerald-400" />
+                    )}
+                    Save to Project
+                  </button>
                   <button
                     type="button"
                     onClick={handleOpenExternal}
