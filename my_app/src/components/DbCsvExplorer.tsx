@@ -230,7 +230,7 @@ export function DbCsvExplorer() {
   const keywordsDone = Math.min(
     keywordsTotal,
     liveForSelected?.keywordsDone ??
-      Math.round((percentDone / 100) * keywordsTotal),
+    Math.round((percentDone / 100) * keywordsTotal),
   );
   const keywordsPending = Math.max(0, keywordsTotal - keywordsDone);
 
@@ -591,8 +591,8 @@ export function DbCsvExplorer() {
                       key={job.id}
                       onClick={() => handleSelectJob(job)}
                       className={`group cursor-pointer rounded-lg border p-2.5 transition ${active
-                          ? "border-emerald-500/70 bg-emerald-500/10"
-                          : "border-slate-800 bg-slate-950/50 hover:border-slate-700 hover:bg-slate-900/60"
+                        ? "border-emerald-500/70 bg-emerald-500/10"
+                        : "border-slate-800 bg-slate-950/50 hover:border-slate-700 hover:bg-slate-900/60"
                         }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -706,8 +706,8 @@ export function DbCsvExplorer() {
                       type="button"
                       onClick={() => handleSelectPath(file.path, null)}
                       className={`flex w-full items-center gap-2 rounded-lg border p-2 text-left transition ${active
-                          ? "border-emerald-500/70 bg-emerald-500/10"
-                          : "border-slate-800 bg-slate-950/50 hover:border-slate-700"
+                        ? "border-emerald-500/70 bg-emerald-500/10"
+                        : "border-slate-800 bg-slate-950/50 hover:border-slate-700"
                         }`}
                     >
                       <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-400" />
@@ -1118,8 +1118,8 @@ export function DbCsvExplorer() {
                     type="button"
                     onClick={() => f.set(!f.val)}
                     className={`rounded-lg border px-2.5 py-1.5 text-xs transition ${f.val
-                        ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
-                        : "border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200"
+                      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                      : "border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200"
                       }`}
                   >
                     {f.label}
