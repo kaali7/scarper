@@ -20,6 +20,12 @@ except ImportError:
     import urllib.request
     HAS_REQUESTS = False
 
+try:
+    import instaloader
+    HAS_INSTALOADER = True
+except ImportError:
+    HAS_INSTALOADER = False
+
 from bs4 import BeautifulSoup
 
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", re.IGNORECASE)
@@ -86,6 +92,11 @@ class InstagramPublicScraper:
 
         html = self._fetch_html(url)
         if not html:
+            # Try instaloader anonymous mode fallback
+            if HAS_INSTALOADER:
+                res = self._scrape_via_instaloader(username)
+                if res:
+                    return res
             return InstagramProfile(
                 username=username,
                 url=url,
@@ -93,7 +104,48 @@ class InstagramPublicScraper:
                 error="Could not fetch Instagram profile page (rate limited or connection error)",
             )
 
-        return self._parse_html(username, url, html)
+        parsed = self._parse_html(username, url, html)
+        # If HTML didn't get follower count, try instaloader
+        if not parsed.followers and HAS_INSTALOADER:
+            loader_res = self._scrape_via_instaloader(username)
+            if loader_res and loader_res.followers:
+                return loader_res
+        return parsed
+
+    def _scrape_via_instaloader(self, username: str) -> Optional[InstagramProfile]:
+        if not HAS_INSTALOADER:
+            return None
+        try:
+            L = instaloader.Instaloader(
+                download_pictures=False,
+                download_videos=False,
+                download_video_thumbnails=False,
+                download_geotags=False,
+                download_comments=False,
+                save_metadata=False,
+                compress_json=False,
+            )
+            prof = instaloader.Profile.from_username(L.context, username)
+            bio = prof.biography or ""
+            emails = EMAIL_REGEX.findall(bio)
+            phones = PHONE_REGEX.findall(bio)
+            return InstagramProfile(
+                username=username,
+                url=f"https://www.instagram.com/{username}/",
+                full_name=prof.full_name or "",
+                bio=bio,
+                followers=str(prof.followers),
+                following=str(prof.followees),
+                posts_count=str(prof.mediacount),
+                is_verified=bool(prof.is_verified),
+                profile_pic_url=prof.profile_pic_url or "",
+                external_url=prof.external_url or "",
+                emails=sorted(list(set(e.lower() for e in emails))),
+                phones=sorted(list(set(p.strip() for p in phones))),
+                status="ok",
+            )
+        except Exception:
+            return None
 
     def _fetch_html(self, url: str) -> Optional[str]:
         try:

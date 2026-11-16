@@ -127,6 +127,15 @@ def main() -> int:
     li_parser.add_argument("--location", help="City or region filter (e.g. 'Mumbai')")
     li_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
+    # sherlock
+    sherlock_parser = subparsers.add_parser("sherlock", help="Find user presence across 400+ social platforms")
+    sherlock_parser.add_argument("handle", help="Username or brand handle to search")
+    sherlock_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # twitter
+    tw_parser = subparsers.add_parser("twitter", help="Twitter / X account lookup via twscrape")
+    tw_parser.add_argument("handle", help="Twitter / X username")
+
     # batch
     batch_parser = subparsers.add_parser("batch", help="Batch enrich CSV file")
     batch_parser.add_argument("--platform", choices=["instagram", "linkedin"], required=True)
@@ -135,7 +144,7 @@ def main() -> int:
     batch_parser.add_argument("--output", help="Output CSV path (defaults to <input>_social.csv)")
     batch_parser.add_argument("--threads", type=int, default=4, help="Worker threads")
 
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     if not args.command:
         parser.print_help()
         return 0
@@ -151,6 +160,20 @@ def main() -> int:
         lead = dorker.find_company(args.company, location=args.location)
         print_linkedin_lead(lead, as_json=args.json)
         return 0 if lead.status == "ok" else 1
+
+    if args.command == "sherlock":
+        clean_handle = args.handle.lstrip("@")
+        cmd = [sys.executable, "-m", "sherlock_project", clean_handle] + unknown
+        if args.json:
+            cmd.append("--json")
+        import subprocess
+        return subprocess.run(cmd).returncode
+
+    if args.command == "twitter":
+        clean_handle = args.handle.lstrip("@")
+        cmd = [sys.executable, "-m", "twscrape", "user_by_login", clean_handle] + unknown
+        import subprocess
+        return subprocess.run(cmd).returncode
 
     if args.command == "batch":
         out = args.output or f"{Path(args.input).stem}_social.csv"

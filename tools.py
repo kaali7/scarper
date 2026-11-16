@@ -194,6 +194,7 @@ class WebEnricherTool(BaseScraperTool):
             entry_point=str(self.entry_point),
             installed=self.is_installed(),
             capabilities=[
+                "crawl4ai_stealth_crawler",
                 "contact_email_extraction",
                 "whatsapp_phone_detection",
                 "social_links_discovery",
@@ -258,11 +259,11 @@ class SocialScraperTool(BaseScraperTool):
             entry_point=str(self.entry_point),
             installed=self.is_installed(),
             capabilities=[
-                "instagram_follower_count",
-                "instagram_verified_badge",
-                "instagram_bio_email_extraction",
-                "linkedin_company_profile_dorking",
-                "linkedin_employee_count_hint",
+                "instaloader_instagram",
+                "sherlock_social_finder",
+                "twscrape_twitter_x",
+                "duckduckgo_search_dorking",
+                "linkedin_company_lead_intelligence",
                 "zero_login_ban_proof_methodology",
             ],
         )

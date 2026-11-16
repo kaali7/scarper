@@ -20,6 +20,12 @@ except ImportError:
     import urllib.request
     HAS_REQUESTS = False
 
+try:
+    from duckduckgo_search import DDGS
+    HAS_DDGS = True
+except ImportError:
+    HAS_DDGS = False
+
 from bs4 import BeautifulSoup
 
 
@@ -59,12 +65,18 @@ class LinkedInDorker:
             query_parts.append(f'"{location}"')
         search_query = " ".join(query_parts)
 
-        # Try DuckDuckGo Lite first (clean HTML, highly resilient)
+        # 1. Try official duckduckgo_search library first if available
+        if HAS_DDGS:
+            lead = self._search_via_ddgs(search_query, company_name)
+            if lead and lead.linkedin_url:
+                return lead
+
+        # 2. Try DuckDuckGo Lite fallback
         lead = self._search_duckduckgo_lite(search_query, company_name)
         if lead and lead.linkedin_url:
             return lead
 
-        # Fallback: Bing HTML search
+        # 3. Fallback: Bing HTML search
         lead = self._search_bing(search_query, company_name)
         if lead and lead.linkedin_url:
             return lead
@@ -75,6 +87,21 @@ class LinkedInDorker:
             status="not_found",
             error="No LinkedIn company profile found for this query",
         )
+
+    def _search_via_ddgs(self, query: str, company_name: str) -> Optional[LinkedInCompanyLead]:
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=3))
+                for r in results:
+                    href = r.get("href", "")
+                    if "linkedin.com/company/" in href:
+                        clean_url = self._clean_linkedin_url(href)
+                        title = r.get("title", "")
+                        body = r.get("body", "")
+                        return self._build_lead(query, company_name, clean_url, title, body)
+        except Exception:
+            pass
+        return None
 
     def _search_duckduckgo_lite(self, query: str, company_name: str) -> Optional[LinkedInCompanyLead]:
         try:

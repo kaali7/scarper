@@ -24,6 +24,12 @@ try:
 except ImportError:
     HAS_BS4 = False
 
+try:
+    import crawl4ai
+    HAS_CRAWL4AI = True
+except ImportError:
+    HAS_CRAWL4AI = False
+
 
 EMAIL_REGEX = re.compile(
     r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
@@ -203,3 +209,43 @@ class WebEnricher:
             pages_visited=visited,
             status="ok",
         )
+
+    def enrich_with_crawl4ai(self, url: str) -> EnrichedContact:
+        """Deep AI/stealth crawl via Crawl4AI."""
+        if not HAS_CRAWL4AI:
+            return self.enrich(url)
+        try:
+            import asyncio
+            from crawl4ai import AsyncWebCrawler
+
+            async def _run():
+                async with AsyncWebCrawler() as crawler:
+                    res = await crawler.arun(url=url)
+                    return res.html
+
+            html_content = asyncio.run(_run())
+            if not html_content:
+                return self.enrich(url)
+
+            all_emails: Set[str] = set()
+            all_phones: Set[str] = set()
+            all_whatsapp: Set[str] = set()
+            all_socials: Dict[str, str] = {}
+
+            emails, phones, wa, socials, _ = self._extract_from_html(html_content, url)
+            all_emails.update(emails)
+            all_phones.update(phones)
+            all_whatsapp.update(wa)
+            all_socials.update(socials)
+
+            return EnrichedContact(
+                url=url,
+                emails=self._clean_emails(all_emails),
+                phones=sorted(all_phones),
+                whatsapp=sorted(all_whatsapp),
+                socials=all_socials,
+                pages_visited=[url],
+                status="ok",
+            )
+        except Exception:
+            return self.enrich(url)
