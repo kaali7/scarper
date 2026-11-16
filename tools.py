@@ -161,21 +161,20 @@ class MapScraperTool(BaseScraperTool):
         }
 
 
-class SocialScraperTool(BaseScraperTool):
-    """Social Media Scraper tool adapter (Placeholder/Template for Instagram/LinkedIn/Twitter)."""
+class EnricherTool(BaseScraperTool):
+    """Website and Contact Lead Enricher tool adapter."""
 
-    name = "social"
-    category = "social_media"
-    description = "Social media scraper for profiles, followers, bios, and lead enrichment."
+    name = "enricher"
+    category = "lead_enrichment"
+    description = "Extracts verified emails, WhatsApp, and social profiles directly from business websites or CSVs."
     version = "1.0.0"
 
     def __init__(self, root_dir: Optional[Path] = None):
         super().__init__(root_dir)
-        self.tool_dir = self.root_dir / "social_scraper"
-        self.entry_point = self.tool_dir / "main.py"
+        self.script_path = self.root_dir / "tools" / "enricher.py"
 
     def is_installed(self) -> bool:
-        return self.entry_point.is_file()
+        return self.script_path.is_file()
 
     def get_metadata(self) -> ToolMetadata:
         return ToolMetadata(
@@ -183,51 +182,207 @@ class SocialScraperTool(BaseScraperTool):
             category=self.category,
             description=self.description,
             version=self.version,
-            directory=str(self.tool_dir),
-            entry_point=str(self.entry_point),
+            directory=str(self.root_dir / "tools"),
+            entry_point=str(self.script_path),
             installed=self.is_installed(),
             capabilities=[
-                "instagram_profiles",
-                "linkedin_company_leads",
-                "twitter_x_lookup",
-                "social_bio_email_extraction",
+                "website_email_extraction",
+                "whatsapp_link_detection",
+                "social_profile_extraction",
+                "csv_batch_enrichment",
+                "subpage_contact_crawler",
             ],
         )
 
     def run(self, args: List[str]) -> int:
         if not self.is_installed():
-            print(
-                f"Social media scraper is not yet installed in '{self.tool_dir}'.\n"
-                "To add a social media scraper (Instagram, LinkedIn, Twitter/X), create\n"
-                "the 'social_scraper/' directory or clone an adapter.\n"
-                "Run 'python tools.py info social' for setup guidelines.",
-                file=sys.stderr,
-            )
+            print(f"Error: {self.script_path} not found.", file=sys.stderr)
             return 1
-        cmd = [sys.executable, str(self.entry_point)] + args
-        return subprocess.run(cmd, cwd=str(self.tool_dir)).returncode
+        cmd = [sys.executable, str(self.script_path)] + args
+        return subprocess.run(cmd, cwd=str(self.root_dir)).returncode
 
     def get_schema(self) -> Dict[str, Any]:
         return {
             "type": "function",
             "function": {
-                "name": "scrape_social_media",
+                "name": "enrich_website_leads",
                 "description": self.description,
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "platform": {
-                            "type": "string",
-                            "enum": ["instagram", "linkedin", "twitter", "facebook"],
-                            "description": "Target social media platform",
-                        },
-                        "usernames_or_urls": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of usernames, handles, or profile URLs to scrape",
-                        },
+                        "url": {"type": "string", "description": "Single website URL to inspect"},
+                        "csv": {"type": "string", "description": "Path to input CSV to enrich in batch"},
+                        "workers": {"type": "integer", "description": "Worker threads", "default": 8},
                     },
-                    "required": ["platform", "usernames_or_urls"],
+                },
+            },
+        }
+
+
+class InstagramTool(BaseScraperTool):
+    """Anonymous Instagram Public Profile Inspector tool adapter."""
+
+    name = "instagram"
+    category = "social_media"
+    description = "Extracts public follower counts, bios, and links anonymously without account login."
+    version = "1.0.0"
+
+    def __init__(self, root_dir: Optional[Path] = None):
+        super().__init__(root_dir)
+        self.script_path = self.root_dir / "tools" / "instagram.py"
+
+    def is_installed(self) -> bool:
+        return self.script_path.is_file()
+
+    def get_metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name=self.name,
+            category=self.category,
+            description=self.description,
+            version=self.version,
+            directory=str(self.root_dir / "tools"),
+            entry_point=str(self.script_path),
+            installed=self.is_installed(),
+            capabilities=[
+                "public_follower_counts",
+                "bio_and_category",
+                "verified_badge",
+                "external_links",
+                "zero_login_stealth",
+            ],
+        )
+
+    def run(self, args: List[str]) -> int:
+        if not self.is_installed():
+            print(f"Error: {self.script_path} not found.", file=sys.stderr)
+            return 1
+        cmd = [sys.executable, str(self.script_path)] + args
+        return subprocess.run(cmd, cwd=str(self.root_dir)).returncode
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": "inspect_instagram_profile",
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "handle": {"type": "string", "description": "Instagram handle or URL to inspect"},
+                    },
+                    "required": ["handle"],
+                },
+            },
+        }
+
+
+class SearchDorkerTool(BaseScraperTool):
+    """Public Search Dorker & B2B Lead Finder tool adapter."""
+
+    name = "dorker"
+    category = "b2b_osint"
+    description = "Discovers LinkedIn company profiles, founders, and decision-makers via search queries."
+    version = "1.0.0"
+
+    def __init__(self, root_dir: Optional[Path] = None):
+        super().__init__(root_dir)
+        self.script_path = self.root_dir / "tools" / "search_dorker.py"
+
+    def is_installed(self) -> bool:
+        return self.script_path.is_file()
+
+    def get_metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name=self.name,
+            category=self.category,
+            description=self.description,
+            version=self.version,
+            directory=str(self.root_dir / "tools"),
+            entry_point=str(self.script_path),
+            installed=self.is_installed(),
+            capabilities=[
+                "duckduckgo_search_queries",
+                "linkedin_company_lookup",
+                "decision_maker_dorking",
+                "ban_free_osint",
+            ],
+        )
+
+    def run(self, args: List[str]) -> int:
+        if not self.is_installed():
+            print(f"Error: {self.script_path} not found.", file=sys.stderr)
+            return 1
+        cmd = [sys.executable, str(self.script_path)] + args
+        return subprocess.run(cmd, cwd=str(self.root_dir)).returncode
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": "search_b2b_dorker",
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "company": {"type": "string", "description": "Target company name"},
+                        "city": {"type": "string", "description": "Optional city/location filter"},
+                        "query": {"type": "string", "description": "Custom raw search dork query"},
+                    },
+                },
+            },
+        }
+
+
+class SocialFinderTool(BaseScraperTool):
+    """Cross-Platform Social Media Profile Finder tool adapter."""
+
+    name = "social_finder"
+    category = "social_media"
+    description = "Multi-platform presence scanner across Instagram, LinkedIn, X, Facebook, YouTube, TikTok."
+    version = "1.0.0"
+
+    def __init__(self, root_dir: Optional[Path] = None):
+        super().__init__(root_dir)
+        self.script_path = self.root_dir / "tools" / "social_finder.py"
+
+    def is_installed(self) -> bool:
+        return self.script_path.is_file()
+
+    def get_metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name=self.name,
+            category=self.category,
+            description=self.description,
+            version=self.version,
+            directory=str(self.root_dir / "tools"),
+            entry_point=str(self.script_path),
+            installed=self.is_installed(),
+            capabilities=[
+                "cross_platform_presence",
+                "brand_handle_verification",
+                "multi_network_probe",
+            ],
+        )
+
+    def run(self, args: List[str]) -> int:
+        if not self.is_installed():
+            print(f"Error: {self.script_path} not found.", file=sys.stderr)
+            return 1
+        cmd = [sys.executable, str(self.script_path)] + args
+        return subprocess.run(cmd, cwd=str(self.root_dir)).returncode
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": "find_social_profiles",
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "handle": {"type": "string", "description": "Brand name or username to probe"},
+                    },
+                    "required": ["handle"],
                 },
             },
         }
@@ -243,7 +398,10 @@ class ToolsRegistry:
 
     def _register_builtins(self) -> None:
         self.register(MapScraperTool(self.root_dir))
-        self.register(SocialScraperTool(self.root_dir))
+        self.register(EnricherTool(self.root_dir))
+        self.register(InstagramTool(self.root_dir))
+        self.register(SearchDorkerTool(self.root_dir))
+        self.register(SocialFinderTool(self.root_dir))
 
     def register(self, tool: BaseScraperTool) -> None:
         self._tools[tool.name.lower()] = tool
@@ -251,10 +409,21 @@ class ToolsRegistry:
     def get(self, name: str) -> Optional[BaseScraperTool]:
         name_clean = name.lower()
         # Aliases
-        if name_clean in ("maps", "google_maps", "gmaps"):
-            name_clean = "map"
-        elif name_clean in ("socials", "social_media"):
-            name_clean = "social"
+        aliases = {
+            "maps": "map",
+            "google_maps": "map",
+            "gmaps": "map",
+            "enrich": "enricher",
+            "website_enricher": "enricher",
+            "ig": "instagram",
+            "insta": "instagram",
+            "search_dorker": "dorker",
+            "linkedin_dorker": "dorker",
+            "social": "social_finder",
+            "socials": "social_finder",
+            "finder": "social_finder",
+        }
+        name_clean = aliases.get(name_clean, name_clean)
         return self._tools.get(name_clean)
 
     def list_tools(self) -> List[ToolMetadata]:
