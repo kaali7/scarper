@@ -158,7 +158,13 @@ export function SettingsLogs() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <label htmlFor="groq-api-key-input" className="sr-only">
+            Groq API Key
+          </label>
           <input
+            id="groq-api-key-input"
+            name="groq-api-key-input"
+            aria-label="Groq API Key"
             type="password"
             value={groqKeyInput}
             onChange={(e) => setGroqKeyInput(e.target.value)}
@@ -201,10 +207,13 @@ export function SettingsLogs() {
         </p>
 
         <div>
-          <label className="mb-1 block text-xs text-slate-400">
+          <label htmlFor="groq-model-select" className="mb-1 block text-xs text-slate-400">
             Groq Tool-Calling Model
           </label>
           <select
+            id="groq-model-select"
+            name="groq-model-select"
+            aria-label="Groq Tool-Calling Model"
             value={groqModel}
             onChange={(e) => setGroqModel(e.target.value)}
             className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
@@ -226,11 +235,14 @@ export function SettingsLogs() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className="mb-1 block text-xs text-slate-400">
+            <label htmlFor="kit-root-input" className="mb-1 block text-xs text-slate-400">
               Scraper Kit Folder
             </label>
             <div className="flex gap-2">
               <input
+                id="kit-root-input"
+                name="kit-root-input"
+                aria-label="Scraper Kit Folder"
                 value={kitRoot}
                 onChange={(e) => setKitRoot(e.target.value)}
                 className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100"
@@ -247,10 +259,13 @@ export function SettingsLogs() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-slate-400">
+            <label htmlFor="python-override-input" className="mb-1 block text-xs text-slate-400">
               Python Executable Override (blank = auto-detect)
             </label>
             <input
+              id="python-override-input"
+              name="python-override-input"
+              aria-label="Python Executable Override"
               value={pythonOverride}
               onChange={(e) => setPythonOverride(e.target.value)}
               placeholder="e.g. python"
@@ -259,10 +274,13 @@ export function SettingsLogs() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-slate-400">
+            <label htmlFor="engine-port-input" className="mb-1 block text-xs text-slate-400">
               Engine Port (SCRAPER_PORT)
             </label>
             <input
+              id="engine-port-input"
+              name="engine-port-input"
+              aria-label="Engine Port"
               type="number"
               min={1}
               max={65535}
@@ -273,10 +291,13 @@ export function SettingsLogs() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-slate-400">
+            <label htmlFor="nav-timeout-input" className="mb-1 block text-xs text-slate-400">
               Page Navigation Timeout, sec (SCRAPER_NAV_TIMEOUT)
             </label>
             <input
+              id="nav-timeout-input"
+              name="nav-timeout-input"
+              aria-label="Page Navigation Timeout"
               type="number"
               min={5}
               max={300}
@@ -287,8 +308,10 @@ export function SettingsLogs() {
           </div>
 
           <div className="flex flex-col justify-end gap-2">
-            <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+            <label htmlFor="setting-headless-input" className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-300">
               <input
+                id="setting-headless-input"
+                name="setting-headless-input"
                 type="checkbox"
                 checked={headless}
                 onChange={(e) => setHeadless(e.target.checked)}
@@ -296,8 +319,10 @@ export function SettingsLogs() {
               />
               Run Chrome Headless (SCRAPER_HEADLESS)
             </label>
-            <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+            <label htmlFor="setting-noupdate-input" className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-300">
               <input
+                id="setting-noupdate-input"
+                name="setting-noupdate-input"
                 type="checkbox"
                 checked={noUpdateCheck}
                 onChange={(e) => setNoUpdateCheck(e.target.checked)}

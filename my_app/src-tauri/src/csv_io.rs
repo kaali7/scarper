@@ -674,7 +674,10 @@ mod tests {
 
     #[test]
     fn loads_coffee_shops_csv_without_error() {
-        let mut path = PathBuf::from(r"../../map_scraper/.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
+        let mut path = PathBuf::from(r"../../tools/map_scraper/.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
+        if !path.is_file() {
+            path = PathBuf::from(r"../../map_scraper/.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
+        }
         if !path.is_file() {
             path = PathBuf::from(r"../../.engine/data/1891c411-25de-4a2a-828a-4ad14b54fcc5.csv");
         }

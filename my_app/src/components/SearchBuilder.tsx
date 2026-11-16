@@ -330,11 +330,14 @@ export function SearchBuilder() {
       <section className="grid gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-5 md:grid-cols-2">
         {/* Keywords */}
         <div className="flex flex-col gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          <label htmlFor="what-keywords-input" className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             What (Business Keywords)
           </label>
           <div className="relative flex gap-2">
             <input
+              id="what-keywords-input"
+              name="what-keywords-input"
+              aria-label="Business Keywords"
               value={kwInput}
               onChange={(e) => setKwInput(e.target.value)}
               onKeyDown={(e) => {
@@ -394,11 +397,14 @@ export function SearchBuilder() {
 
         {/* Cities */}
         <div className="flex flex-col gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          <label htmlFor="where-cities-input" className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Where (Cities / Areas)
           </label>
           <div className="relative flex gap-2">
             <input
+              id="where-cities-input"
+              name="where-cities-input"
+              aria-label="Cities and Areas"
               value={cityQuery}
               onChange={(e) => setCityQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -535,28 +541,37 @@ export function SearchBuilder() {
               checked: tech,
               set: setTech,
             },
-          ].map((opt) => (
-            <label
-              key={opt.label}
-              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-700"
-            >
-              <input
-                type="checkbox"
-                checked={opt.checked}
-                onChange={(e) => opt.set(e.target.checked)}
-                className="accent-emerald-500"
-              />
-              {opt.label}
-            </label>
-          ))}
+          ].map((opt, idx) => {
+            const optId = `preset-opt-${idx}`;
+            return (
+              <label
+                key={opt.label}
+                htmlFor={optId}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-700"
+              >
+                <input
+                  id={optId}
+                  name={optId}
+                  type="checkbox"
+                  checked={opt.checked}
+                  onChange={(e) => opt.set(e.target.checked)}
+                  className="accent-emerald-500"
+                />
+                {opt.label}
+              </label>
+            );
+          })}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">
+            <label htmlFor="fields-mode-select" className="mb-1 block text-xs font-medium text-slate-400">
               Output Columns
             </label>
             <select
+              id="fields-mode-select"
+              name="fields-mode-select"
+              aria-label="Output Columns"
               value={fieldsMode}
               onChange={(e) => {
                 setFieldsMode(e.target.value as "phone_only" | "lead8" | "all");
@@ -570,10 +585,13 @@ export function SearchBuilder() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">
+            <label htmlFor="out-filename-input" className="mb-1 block text-xs font-medium text-slate-400">
               Output CSV Filename (optional)
             </label>
             <input
+              id="out-filename-input"
+              name="out-filename-input"
+              aria-label="Output CSV Filename"
               value={outFilename}
               onChange={(e) => setOutFilename(e.target.value)}
               placeholder="e.g. navi-mumbai-thane-leads.csv"
@@ -599,10 +617,13 @@ export function SearchBuilder() {
           {showAdvanced && (
             <div className="mt-3 grid gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-4 sm:grid-cols-3">
               <div>
-                <label className="mb-1 block text-xs text-slate-400">
+                <label htmlFor="adv-depth-input" className="mb-1 block text-xs text-slate-400">
                   Depth (~20 places/step)
                 </label>
                 <input
+                  id="adv-depth-input"
+                  name="adv-depth-input"
+                  aria-label="Depth"
                   type="number"
                   min={1}
                   max={1000}
@@ -612,10 +633,13 @@ export function SearchBuilder() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">
+                <label htmlFor="adv-country-input" className="mb-1 block text-xs text-slate-400">
                   Country (2-letter, e.g. in)
                 </label>
                 <input
+                  id="adv-country-input"
+                  name="adv-country-input"
+                  aria-label="Country"
                   maxLength={2}
                   value={country}
                   onChange={(e) => setCountry(e.target.value)}
@@ -624,10 +648,13 @@ export function SearchBuilder() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">
+                <label htmlFor="adv-lang-input" className="mb-1 block text-xs text-slate-400">
                   Language (2-letter)
                 </label>
                 <input
+                  id="adv-lang-input"
+                  name="adv-lang-input"
+                  aria-label="Language"
                   maxLength={2}
                   value={lang}
                   onChange={(e) => setLang(e.target.value)}
@@ -635,10 +662,13 @@ export function SearchBuilder() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">
+                <label htmlFor="adv-maxtime-input" className="mb-1 block text-xs text-slate-400">
                   Max Time (seconds)
                 </label>
                 <input
+                  id="adv-maxtime-input"
+                  name="adv-maxtime-input"
+                  aria-label="Max Time in seconds"
                   type="number"
                   min={30}
                   max={86400}
@@ -648,10 +678,13 @@ export function SearchBuilder() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">
+                <label htmlFor="adv-reviews-input" className="mb-1 block text-xs text-slate-400">
                   Reviews per place (0-5)
                 </label>
                 <input
+                  id="adv-reviews-input"
+                  name="adv-reviews-input"
+                  aria-label="Reviews per place"
                   type="number"
                   min={0}
                   max={5}
@@ -661,10 +694,13 @@ export function SearchBuilder() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-400">
+                <label htmlFor="adv-grid-input" className="mb-1 block text-xs text-slate-400">
                   Grid N x N (optional, 1-10)
                 </label>
                 <input
+                  id="adv-grid-input"
+                  name="adv-grid-input"
+                  aria-label="Grid size"
                   type="number"
                   min={1}
                   max={10}
@@ -674,8 +710,10 @@ export function SearchBuilder() {
                   className="w-full rounded border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-sm text-slate-100"
                 />
               </div>
-              <label className="inline-flex items-center gap-2 text-xs text-slate-300 sm:col-span-3">
+              <label htmlFor="adv-deepscan-checkbox" className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-300 sm:col-span-3">
                 <input
+                  id="adv-deepscan-checkbox"
+                  name="adv-deepscan-checkbox"
                   type="checkbox"
                   checked={deepScan}
                   onChange={(e) => setDeepScan(e.target.checked)}
@@ -684,10 +722,13 @@ export function SearchBuilder() {
                 Deep Scan (splits saturated grid tiles into 4 sub-tiles)
               </label>
               <div className="sm:col-span-3">
-                <label className="mb-1 block text-xs text-slate-400">
+                <label htmlFor="adv-proxies-input" className="mb-1 block text-xs text-slate-400">
                   Proxies (one URL per line, optional)
                 </label>
                 <textarea
+                  id="adv-proxies-input"
+                  name="adv-proxies-input"
+                  aria-label="Proxies list"
                   rows={2}
                   value={proxiesText}
                   onChange={(e) => setProxiesText(e.target.value)}

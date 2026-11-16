@@ -494,7 +494,13 @@ export function AiChat() {
       {/* Input */}
       <div className="border-t border-slate-800 p-3">
         <div className="flex gap-2">
+          <label htmlFor="ai-chat-prompt-input" className="sr-only">
+            Chat Prompt
+          </label>
           <textarea
+            id="ai-chat-prompt-input"
+            name="ai-chat-prompt-input"
+            aria-label="Chat Prompt"
             rows={2}
             value={input}
             onChange={(e) => setInput(e.target.value)}

@@ -1095,6 +1095,9 @@ export function DbCsvExplorer() {
                 <div className="relative min-w-[200px] flex-1">
                   <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-500" />
                   <input
+                    id="csv-rows-search"
+                    name="csv-rows-search"
+                    aria-label="Search rows"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search rows…"
@@ -1160,22 +1163,29 @@ export function DbCsvExplorer() {
                         </button>
                       </div>
                       <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
-                        {allHeaders.map((col) => (
-                          <label
-                            key={col}
-                            className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-800"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={visibleHeaders.includes(col)}
-                              onChange={() => toggleColumn(col)}
-                              className="accent-emerald-500"
-                            />
-                            <span className="truncate font-mono text-[11px]">
-                              {col}
-                            </span>
-                          </label>
-                        ))}
+                        {allHeaders.map((col) => {
+                          const colInputId = `col-toggle-${col.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+                          return (
+                            <label
+                              key={col}
+                              htmlFor={colInputId}
+                              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-0.5 text-xs text-slate-300 hover:bg-slate-800"
+                            >
+                              <input
+                                id={colInputId}
+                                name={colInputId}
+                                aria-label={`Toggle column ${col}`}
+                                type="checkbox"
+                                checked={visibleHeaders.includes(col)}
+                                onChange={() => toggleColumn(col)}
+                                className="accent-emerald-500"
+                              />
+                              <span className="truncate font-mono text-[11px]">
+                                {col}
+                              </span>
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

@@ -1,7 +1,0 @@
-# Core tool dependencies (already standard in Python or lightweight)
-requests>=2.28.0
-beautifulsoup4>=4.11.0
-
-# Optional stealth & LLM crawling tools (recommended for advanced enrichment)
-# pip install crawl4ai
-# pip install instaloader

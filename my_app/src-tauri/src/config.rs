@@ -65,6 +65,8 @@ pub struct SettingsSummary {
 pub fn normalize_kit_root_path(path: &Path) -> PathBuf {
     if path.join("engine").join("serve.py").is_file() {
         path.to_path_buf()
+    } else if path.join("tools").join("map_scraper").join("engine").join("serve.py").is_file() {
+        path.join("tools").join("map_scraper")
     } else if path.join("map_scraper").join("engine").join("serve.py").is_file() {
         path.join("map_scraper")
     } else {
@@ -96,6 +98,10 @@ pub fn detect_kit_root() -> Option<PathBuf> {
             }
             cur = dir.parent();
         }
+    }
+    let tools_map_fallback = PathBuf::from(r"c:\kali\product\scraper\tools\map_scraper");
+    if is_valid_kit_root(&tools_map_fallback) {
+        return Some(tools_map_fallback);
     }
     let map_fallback = PathBuf::from(r"c:\kali\product\scraper\map_scraper");
     if is_valid_kit_root(&map_fallback) {
