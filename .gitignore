@@ -21,3 +21,8 @@ Thumbs.db
 
 # The engine's jobs, results, logs and downloaded Chrome
 .engine/
+
+# Transfer / release packages
+GoogleMapsScraper_Portable/
+GoogleMapsScraper_TransferReady.zip
+*.lnk
